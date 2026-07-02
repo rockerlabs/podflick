@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Secret guard (KB.27) — block a COMMIT that introduces a key-shaped secret. Catches it earliest: the
+# secret never enters local history. Resolves the scanner next to THIS hook, so the same file works both
+# as the machine-global hook (core.hooksPath=~/.claude/githooks-global) and vendored in a repo's githooks/.
+# Bypass (intentional escape hatch): git commit --no-verify
+d="$(cd "$(dirname "$0")" && pwd)"
+exec "$d/secret-scan.sh" --staged

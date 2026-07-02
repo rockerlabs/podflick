@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Secret guard (KB.27) — block a PUSH that introduces a key-shaped secret. The hard outward boundary
+# (the secret leaving the machine). Resolves the scanner next to THIS hook, so the same file works both
+# as the machine-global hook (core.hooksPath=~/.claude/githooks-global) and vendored in a repo's githooks/.
+# Bypass (intentional escape hatch): git push --no-verify
+d="$(cd "$(dirname "$0")" && pwd)"
+exec "$d/secret-scan.sh" "$@"
