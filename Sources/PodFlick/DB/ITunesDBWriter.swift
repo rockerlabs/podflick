@@ -20,7 +20,8 @@ struct ITunesDBWriter {
     private(set) var db: ITunesDB
 
     init(_ data: Data) throws {
-        self.data = Data(data)          // re-base: all offsets are absolute
+        // Re-base slices: every parse offset is absolute in `self.data`.
+        self.data = data.startIndex == 0 ? data : Data(data)
         self.db = try ITunesDB.parse(data)
     }
 
@@ -62,9 +63,6 @@ struct ITunesDBWriter {
                 ?? db.tracks.first else {
             throw WriteError(message: "DB has no track to clone from")
         }
-        guard let trackSection = section(containing: donor.offset) else {
-            throw WriteError(message: "donor mhit outside every section")
-        }
         guard !db.masterPlaylists.isEmpty else {
             throw WriteError(message: "DB has no master playlist")
         }
@@ -73,39 +71,26 @@ struct ITunesDBWriter {
         let trackID = base + 2
         let itemID = base + 3
 
-        struct Splice {
-            let insertAt: Int
-            let blob: Data
-            let sizeBumpOffsets: [Int]  // u32 total-size fields += blob.count
-            let countOffset: Int        // u32 record-count field += 1
-        }
-        var splices = [Splice(
-            insertAt: trackSection.offset + trackSection.totalSize,
-            blob: try cloneTrack(donor: donor, id: trackID, dbid: dbid,
-                                 new: new, timestamp: timestamp),
-            sizeBumpOffsets: [trackSection.offset + 8, 8],
-            countOffset: trackSection.listOffset + 8)]
+        let trackListEnd = donor.section.offset + donor.section.totalSize
+        var edits = [Edit(
+            range: trackListEnd..<trackListEnd,
+            replacement: try cloneTrack(donor: donor, id: trackID, dbid: dbid,
+                                        new: new, timestamp: timestamp),
+            sizeBumpOffsets: [donor.section.offset + 8],
+            countBump: (offset: donor.section.listOffset + 8, delta: 1))]
         for master in db.masterPlaylists {
-            splices.append(Splice(
-                insertAt: master.offset + master.totalSize,
-                blob: try cloneItem(in: master, trackID: trackID,
-                                    itemID: itemID, trackDBID: dbid,
-                                    itemDBID: itemDBID, timestamp: timestamp),
+            let masterEnd = master.offset + master.totalSize
+            edits.append(Edit(
+                range: masterEnd..<masterEnd,
+                replacement: try cloneItem(in: master, trackID: trackID,
+                                           itemID: itemID, trackDBID: dbid,
+                                           itemDBID: itemDBID,
+                                           timestamp: timestamp),
                 sizeBumpOffsets: [master.offset + 8,
-                                  master.section.offset + 8, 8],
-                countOffset: master.offset + 16))
+                                  master.section.offset + 8],
+                countBump: (offset: master.offset + 16, delta: 1)))
         }
-
-        // Descending file order: each splice's bump offsets sit below its
-        // insertion point, so nothing already applied ever shifts.
-        for s in splices.sorted(by: { $0.insertAt > $1.insertAt }) {
-            data.replaceSubrange(s.insertAt..<s.insertAt, with: s.blob)
-            for offset in s.sizeBumpOffsets {
-                try bump(offset, by: s.blob.count)
-            }
-            try bump(s.countOffset, by: 1)
-        }
-        db = try ITunesDB.parse(data)
+        try apply(edits)
         return trackID
     }
 
@@ -118,16 +103,11 @@ struct ITunesDBWriter {
         guard let titleRange = track.titleMhodRange else {
             throw WriteError(message: "track \(trackID) has no title mhod")
         }
-        guard let section = section(containing: track.offset) else {
-            throw WriteError(message: "mhit outside every section")
-        }
-        let newMhod = Self.stringMhod(type: 1, newTitle)
-        let delta = newMhod.count - titleRange.count
-        data.replaceSubrange(titleRange, with: newMhod)
-        try bump(track.offset + 8, by: delta)
-        try bump(section.offset + 8, by: delta)
-        try bump(8, by: delta)
-        db = try ITunesDB.parse(data)
+        try apply([Edit(
+            range: titleRange,
+            replacement: Self.stringMhod(type: 1, newTitle),
+            sizeBumpOffsets: [track.offset + 8, track.section.offset + 8],
+            countBump: nil)])
     }
 
     // MARK: - remove
@@ -137,36 +117,60 @@ struct ITunesDBWriter {
     /// media file is the device layer's job, not the DB's.
     mutating func remove(trackID: UInt32) throws {
         let track = try track(withID: trackID)
-        guard let trackSection = section(containing: track.offset) else {
-            throw WriteError(message: "mhit outside every section")
-        }
-
-        struct Cut {
-            let range: Range<Int>
-            let sizeBumpOffsets: [Int]
-            let countOffset: Int
-        }
-        var cuts = [Cut(range: track.offset ..< track.offset + track.totalSize,
-                        sizeBumpOffsets: [trackSection.offset + 8, 8],
-                        countOffset: trackSection.listOffset + 8)]
+        var edits = [Edit(
+            range: track.offset ..< track.offset + track.totalSize,
+            replacement: Data(),
+            sizeBumpOffsets: [track.section.offset + 8],
+            countBump: (offset: track.section.listOffset + 8, delta: -1))]
         for master in db.masterPlaylists {
             for item in master.items where item.trackID == trackID {
-                cuts.append(Cut(
+                edits.append(Edit(
                     range: item.offset ..< item.offset + item.totalSize,
+                    replacement: Data(),
                     sizeBumpOffsets: [master.offset + 8,
-                                      master.section.offset + 8, 8],
-                    countOffset: master.offset + 16))
+                                      master.section.offset + 8],
+                    countBump: (offset: master.offset + 16, delta: -1)))
             }
         }
+        try apply(edits)
+    }
 
-        for cut in cuts.sorted(by: { $0.range.lowerBound > $1.range.lowerBound }) {
-            data.removeSubrange(cut.range)
-            for offset in cut.sizeBumpOffsets {
-                try bump(offset, by: -cut.range.count)
+    // MARK: - Splice application
+
+    /// One splice: replace `range` with `replacement` (either side may be
+    /// empty — a pure insert or delete), bump each enclosing size field by
+    /// the length delta, and adjust the owning list's count.
+    private struct Edit {
+        let range: Range<Int>
+        let replacement: Data
+        let sizeBumpOffsets: [Int]  // enclosing mhit/mhyp/mhsd; mhbd is implied
+        let countBump: (offset: Int, delta: Int)?
+    }
+
+    /// Applies edits in descending file order: every edit's bump offsets sit
+    /// below its own range — and therefore below every not-yet-applied,
+    /// lower-lying edit — so nothing already patched ever shifts.
+    private mutating func apply(_ edits: [Edit]) throws {
+        for edit in edits.sorted(by: { $0.range.lowerBound > $1.range.lowerBound }) {
+            assert(edit.sizeBumpOffsets.allSatisfy { $0 < edit.range.lowerBound })
+            let delta = edit.replacement.count - edit.range.count
+            data.replaceSubrange(edit.range, with: edit.replacement)
+            for offset in edit.sizeBumpOffsets + [8] {  // 8 = mhbd total size
+                try bump(offset, by: delta)
             }
-            try bump(cut.countOffset, by: -1)
+            if let countBump = edit.countBump {
+                try bump(countBump.offset, by: countBump.delta)
+            }
         }
         db = try ITunesDB.parse(data)
+    }
+
+    private mutating func bump(_ offset: Int, by delta: Int) throws {
+        let old = try Reader(data).u32(offset)
+        guard let new = UInt32(exactly: Int(old) + delta) else {
+            throw WriteError(message: "size field @0x\(String(offset, radix: 16)) under/overflow")
+        }
+        data.putU32(new, at: offset)
     }
 
     // MARK: - Donor cloning
@@ -221,7 +225,8 @@ struct ITunesDBWriter {
         blob.putU64(trackDBID, at: 0x2C)
         blob.putU64(itemDBID, at: 0x3C)
         // mhod100 carries an order/position value: donor's + a small bump.
-        blob.putU32(blob.getU32(at: headerSize + 0x18) + 2, at: headerSize + 0x18)
+        let positionOffset = headerSize + 0x18
+        blob.putU32(try Reader(blob).u32(positionOffset) + 2, at: positionOffset)
         return blob
     }
 
@@ -230,36 +235,26 @@ struct ITunesDBWriter {
     /// the layout): 0x18 header; payload encoding=1, byte length, flag=1,
     /// pad; UTF-16LE text zero-padded to a 4-byte boundary.
     private static func stringMhod(type: UInt32, _ text: String) -> Data {
-        let utf16 = Array(text.utf16)
-        let byteLength = utf16.count * 2
-        var mhod = Data(count: (0x18 + 16 + byteLength + 3) & ~3)
+        let payload = Data(text.utf16.flatMap { [UInt8($0 & 0xFF), UInt8($0 >> 8)] })
+        var mhod = Data(count: (0x18 + 16 + payload.count + 3) & ~3)
         mhod.replaceSubrange(0..<4, with: Data("mhod".utf8))
         mhod.putU32(0x18, at: 4)
         mhod.putU32(UInt32(mhod.count), at: 8)
         mhod.putU32(type, at: 12)
         mhod.putU32(1, at: 0x18)                // encoding: UTF-16LE
-        mhod.putU32(UInt32(byteLength), at: 0x1C)
+        mhod.putU32(UInt32(payload.count), at: 0x1C)
         mhod.putU32(1, at: 0x20)
-        for (i, unit) in utf16.enumerated() {
-            mhod[0x28 + 2 * i] = UInt8(unit & 0xFF)
-            mhod[0x28 + 2 * i + 1] = UInt8(unit >> 8)
-        }
+        mhod.replaceSubrange(0x28 ..< 0x28 + payload.count, with: payload)
         return mhod
     }
 
-    // MARK: - Lookup and size-field helpers
+    // MARK: - Lookups
 
     private func track(withID id: UInt32) throws -> ITunesDB.Track {
         guard let track = db.tracks.first(where: { $0.id == id }) else {
             throw WriteError(message: "no track with id \(id)")
         }
         return track
-    }
-
-    private func section(containing offset: Int) -> ITunesDB.Section? {
-        db.sections.first {
-            offset >= $0.offset && offset < $0.offset + $0.totalSize
-        }
     }
 
     /// Superset of the reference's max_id: every track/album/item id in the
@@ -272,14 +267,6 @@ struct ITunesDBWriter {
             maxID = max(maxID, item.itemID, item.trackID)
         }
         return maxID
-    }
-
-    private mutating func bump(_ offset: Int, by delta: Int) throws {
-        let old = try Reader(data).u32(offset)
-        guard let new = UInt32(exactly: Int(old) + delta) else {
-            throw WriteError(message: "size field @0x\(String(offset, radix: 16)) under/overflow")
-        }
-        data.putU32(new, at: offset)
     }
 }
 
@@ -296,11 +283,5 @@ private extension Data {
         withUnsafeMutableBytes {
             $0.storeBytes(of: value.littleEndian, toByteOffset: offset, as: UInt64.self)
         }
-    }
-
-    func getU32(at offset: Int) -> UInt32 {
-        withUnsafeBytes {
-            $0.loadUnaligned(fromByteOffset: offset, as: UInt32.self)
-        }.littleEndian
     }
 }

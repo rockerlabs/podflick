@@ -34,6 +34,7 @@ struct ITunesDB {
     struct Track {
         let offset: Int             // mhit position in the file
         let totalSize: Int          // donor cloning copies offset..<offset+totalSize
+        let section: Section        // enclosing mhsd — splices bump its size field
         let id: UInt32
         let title: String
         let path: String            // iPod-style, e.g. ":iPod_Control:Music:F16:JHBI.m4v"
@@ -134,7 +135,8 @@ struct ITunesDB {
             case "mhlt":
                 try walkChildren(r, magic: "mhit", from: firstRecord,
                                  count: recordCount, limit: sectionEnd) {
-                    tracks.append(try parseTrack(r, at: $0, totalSize: $1))
+                    tracks.append(try parseTrack(r, at: $0, totalSize: $1,
+                                                 section: section))
                 }
             case "mhla":
                 try walkChildren(r, magic: "mhia", from: firstRecord,
@@ -168,7 +170,7 @@ struct ITunesDB {
     // MARK: - Record parsers
 
     private static func parseTrack(
-        _ r: Reader, at pos: Int, totalSize: Int
+        _ r: Reader, at pos: Int, totalSize: Int, section: Section
     ) throws -> Track {
         let headerSize = Int(try r.u32(pos + 4))
         guard headerSize >= minTrackHeader, headerSize <= totalSize else {
@@ -198,6 +200,7 @@ struct ITunesDB {
         return Track(
             offset: pos,
             totalSize: totalSize,
+            section: section,
             id: try r.u32(pos + 0x10),
             title: title?.text ?? "",
             path: path?.text ?? "",
@@ -303,9 +306,10 @@ struct ITunesDB {
 struct Reader {
     private let data: Data
 
-    // Re-base to zero-indexed storage: Data slices (prefix/dropFirst/…)
-    // keep their parent's indices and would trap in subdata(in:).
-    init(_ data: Data) { self.data = Data(data) }
+    // Re-base slices to zero-indexed storage (prefix/dropFirst/… keep the
+    // parent's indices and would trap in subdata(in:)); whole buffers pass
+    // through without a copy, so per-read construction is free.
+    init(_ data: Data) { self.data = data.startIndex == 0 ? data : Data(data) }
 
     private func check(_ offset: Int, count: Int) throws {
         guard offset >= 0, count >= 0, offset + count <= data.count else {

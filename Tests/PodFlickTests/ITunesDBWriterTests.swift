@@ -53,17 +53,15 @@ final class ITunesDBWriterTests: XCTestCase {
     // MARK: - add splice structure (checked through the strict parser)
 
     func testAddClonesDonorAtEndOfLists() throws {
-        let original = try ITunesDB.parse(try fixture("iTunesDB.four-videos"))
         var writer = try ITunesDBWriter(try fixture("iTunesDB.four-videos"))
+        let original = writer.db
         let trackID = try writer.add(newVideo, dbid: dbid,
                                      itemDBID: itemDBID, timestamp: timestamp)
 
-        // Ids follow the proven pattern: max used id +2, item id +3.
-        let maxUsed = original.tracks.map { max($0.id, $0.albumID) }
-            .reduce(original.playlists.flatMap(\.items)
-                .map { max($0.itemID, $0.trackID) }
-                .reduce(original.albums.map(\.id).max() ?? 0, max), max)
-        XCTAssertEqual(trackID, maxUsed + 2)
+        // Ids follow the proven pattern: max used id +2, item id +3. The
+        // golden fixture's max used id is 69 (the master playlists' last
+        // mhip item id).
+        XCTAssertEqual(trackID, 71)
 
         let db = writer.db
         XCTAssertEqual(db.tracks.count, 5)
