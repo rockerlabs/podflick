@@ -3,6 +3,17 @@ options:
   bundleIdPrefix: com.dbudnikau
   deploymentTarget:
     macOS: "14.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    GENERATE_INFOPLIST_FILE: YES
+schemes:
+  PodFlick:
+    build:
+      targets:
+        PodFlick: all
+    test:
+      targets: [PodFlickTests]
 targets:
   PodFlick:
     type: application
@@ -14,7 +25,11 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.dbudnikau.podflick
-        GENERATE_INFOPLIST_FILE: YES
-        SWIFT_VERSION: "5.10"
         CODE_SIGN_STYLE: Automatic
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+  PodFlickTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [Tests]
+    dependencies:
+      - target: PodFlick
