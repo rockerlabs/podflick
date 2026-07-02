@@ -5,17 +5,6 @@ import XCTest
 /// captured from the operator's devices (see reference/fixtures/).
 final class ITunesDBParserTests: XCTestCase {
 
-    private func fixture(_ name: String) throws -> Data {
-        // Tests/PodFlickTests/<this file> -> repo root -> reference/fixtures
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()   // PodFlickTests
-            .deletingLastPathComponent()   // Tests
-            .deletingLastPathComponent()   // repo root
-        return try Data(contentsOf: root
-            .appendingPathComponent("reference/fixtures")
-            .appendingPathComponent(name))
-    }
-
     // MARK: - Single-video fixture (Finder-written, the byte-exact template)
 
     func testSingleVideoFixtureParses() throws {

@@ -44,6 +44,7 @@ struct ITunesDB {
         let albumID: UInt32         // 0 = no album record
         let titleMhodRange: Range<Int>?   // rename splices this range
         let pathMhodRange: Range<Int>?
+        let kindMhodRange: Range<Int>?    // type 6; donor cloning copies it verbatim
     }
 
     struct PlaylistItem {
@@ -176,6 +177,7 @@ struct ITunesDB {
         }
         var title: (text: String, range: Range<Int>)?
         var path: (text: String, range: Range<Int>)?
+        var kind: Range<Int>?
         try walkChildren(r, magic: "mhod", from: pos + headerSize,
                          count: Int(try r.u32(pos + 0x0C)),
                          limit: pos + totalSize) { mhod, mhodTotal in
@@ -187,6 +189,8 @@ struct ITunesDB {
             case 2 where path == nil:
                 path = (try stringPayload(r, at: mhod, totalSize: mhodTotal),
                         mhod..<(mhod + mhodTotal))
+            case 6 where kind == nil:
+                kind = mhod..<(mhod + mhodTotal)
             default:
                 break
             }
@@ -203,7 +207,8 @@ struct ITunesDB {
             mediaType: try r.u32(pos + 0xD0),
             albumID: try r.u32(pos + 0x120),
             titleMhodRange: title?.range,
-            pathMhodRange: path?.range)
+            pathMhodRange: path?.range,
+            kindMhodRange: kind)
     }
 
     private static func parsePlaylist(
@@ -294,7 +299,8 @@ struct ITunesDB {
 
 // MARK: - Bounds-checked little-endian reader
 
-private struct Reader {
+/// Shared by the parser and the splice writer (ITunesDBWriter).
+struct Reader {
     private let data: Data
 
     // Re-base to zero-indexed storage: Data slices (prefix/dropFirst/…)
