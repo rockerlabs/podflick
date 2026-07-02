@@ -25,8 +25,11 @@ struct IPodDevice {
 
     var isSupported: Bool { rejection == nil }
 
-    var databaseURL: URL {
-        volumeURL.appendingPathComponent("iPod_Control/iTunes/iTunesDB")
+    var databaseURL: URL { Self.databaseURL(onVolume: volumeURL) }
+
+    /// Single source of the on-device DB path; the scanner probes it too.
+    static func databaseURL(onVolume volume: URL) -> URL {
+        volume.appendingPathComponent("iPod_Control/iTunes/iTunesDB")
     }
 
     /// Slack the free-space check reserves beyond the incoming file itself:
