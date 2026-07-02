@@ -21,8 +21,8 @@ struct ITunesDBWriter {
 
     init(_ data: Data) throws {
         // Re-base slices: every parse offset is absolute in `self.data`.
-        self.data = data.startIndex == 0 ? data : Data(data)
-        self.db = try ITunesDB.parse(data)
+        self.data = data.rebasedToZero
+        self.db = try ITunesDB.parse(self.data)
     }
 
     struct WriteError: Error, CustomStringConvertible {
@@ -180,16 +180,15 @@ struct ITunesDBWriter {
         guard let kindRange = donor.kindMhodRange else {
             throw WriteError(message: "donor track \(donor.id) has no filetype mhod")
         }
-        let headerSize = Int(try Reader(data).u32(donor.offset + 4))
         // The clone patches fields up to 0x1F4 — reject exotic donors.
-        guard headerSize >= 0x1F8 else {
-            throw WriteError(message: "donor mhit header 0x\(String(headerSize, radix: 16)) too small to clone")
+        guard donor.headerSize >= 0x1F8 else {
+            throw WriteError(message: "donor mhit header 0x\(String(donor.headerSize, radix: 16)) too small to clone")
         }
         let children = Self.stringMhod(type: 1, new.title)
                      + data.subdata(in: kindRange)
                      + Self.stringMhod(type: 2, new.ipodPath)
-        var header = data.subdata(in: donor.offset ..< donor.offset + headerSize)
-        header.putU32(UInt32(headerSize + children.count), at: 0x08)
+        var header = data.subdata(in: donor.offset ..< donor.offset + donor.headerSize)
+        header.putU32(UInt32(donor.headerSize + children.count), at: 0x08)
         header.putU32(3, at: 0x0C)              // child mhod count
         header.putU32(id, at: 0x10)
         header.putU32(timestamp, at: 0x20)      // date modified
@@ -235,7 +234,8 @@ struct ITunesDBWriter {
     /// the layout): 0x18 header; payload encoding=1, byte length, flag=1,
     /// pad; UTF-16LE text zero-padded to a 4-byte boundary.
     private static func stringMhod(type: UInt32, _ text: String) -> Data {
-        let payload = Data(text.utf16.flatMap { [UInt8($0 & 0xFF), UInt8($0 >> 8)] })
+        // Explicit-endian UTF-16 encoding emits no BOM and cannot fail.
+        let payload = text.data(using: .utf16LittleEndian)!
         var mhod = Data(count: (0x18 + 16 + payload.count + 3) & ~3)
         mhod.replaceSubrange(0..<4, with: Data("mhod".utf8))
         mhod.putU32(0x18, at: 4)
@@ -263,8 +263,10 @@ struct ITunesDBWriter {
         var maxID: UInt32 = 0
         for track in db.tracks { maxID = max(maxID, track.id, track.albumID) }
         for album in db.albums { maxID = max(maxID, album.id) }
-        for item in db.playlists.flatMap(\.items) {
-            maxID = max(maxID, item.itemID, item.trackID)
+        for playlist in db.playlists {
+            for item in playlist.items {
+                maxID = max(maxID, item.itemID, item.trackID)
+            }
         }
         return maxID
     }
@@ -273,13 +275,17 @@ struct ITunesDBWriter {
 // MARK: - Little-endian stores into clone buffers
 
 private extension Data {
+    // The write half of the byte layer mirrors Reader.check's bounds
+    // discipline: a miscomputed offset must fail loudly, not corrupt memory.
     mutating func putU32(_ value: UInt32, at offset: Int) {
+        precondition(offset >= 0 && offset + 4 <= count, "u32 store out of bounds")
         withUnsafeMutableBytes {
             $0.storeBytes(of: value.littleEndian, toByteOffset: offset, as: UInt32.self)
         }
     }
 
     mutating func putU64(_ value: UInt64, at offset: Int) {
+        precondition(offset >= 0 && offset + 8 <= count, "u64 store out of bounds")
         withUnsafeMutableBytes {
             $0.storeBytes(of: value.littleEndian, toByteOffset: offset, as: UInt64.self)
         }

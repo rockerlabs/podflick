@@ -43,8 +43,9 @@ struct ITunesDB {
         let dbid: UInt64
         let mediaType: UInt32       // 2 = movie
         let albumID: UInt32         // 0 = no album record
+        let headerSize: Int         // donor cloning patches fields within it
         let titleMhodRange: Range<Int>?   // rename splices this range
-        let pathMhodRange: Range<Int>?
+        let pathMhodRange: Range<Int>?    // parsed for symmetry; no splice consumes it yet
         let kindMhodRange: Range<Int>?    // type 6; donor cloning copies it verbatim
     }
 
@@ -209,6 +210,7 @@ struct ITunesDB {
             dbid: try r.u64(pos + 0x70),
             mediaType: try r.u32(pos + 0xD0),
             albumID: try r.u32(pos + 0x120),
+            headerSize: headerSize,
             titleMhodRange: title?.range,
             pathMhodRange: path?.range,
             kindMhodRange: kind)
@@ -300,16 +302,21 @@ struct ITunesDB {
     }
 }
 
+extension Data {
+    /// Re-bases slices to zero-indexed storage (prefix/dropFirst/… keep the
+    /// parent's indices and would trap in subdata(in:)); whole buffers pass
+    /// through without a copy. The one shared rule for making offsets
+    /// absolute — Reader and ITunesDBWriter must never diverge on it.
+    var rebasedToZero: Data { startIndex == 0 ? self : Data(self) }
+}
+
 // MARK: - Bounds-checked little-endian reader
 
 /// Shared by the parser and the splice writer (ITunesDBWriter).
 struct Reader {
     private let data: Data
 
-    // Re-base slices to zero-indexed storage (prefix/dropFirst/… keep the
-    // parent's indices and would trap in subdata(in:)); whole buffers pass
-    // through without a copy, so per-read construction is free.
-    init(_ data: Data) { self.data = data.startIndex == 0 ? data : Data(data) }
+    init(_ data: Data) { self.data = data.rebasedToZero }
 
     private func check(_ offset: Int, count: Int) throws {
         guard offset >= 0, count >= 0, offset + count <= data.count else {
