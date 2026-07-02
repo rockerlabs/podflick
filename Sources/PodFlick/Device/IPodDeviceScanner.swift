@@ -7,7 +7,8 @@ import Foundation
 struct IPodDeviceScanner {
 
     var volumesDirectory = URL(fileURLWithPath: "/Volumes", isDirectory: true)
-    var fileManager: FileManager = .default
+
+    private let fileManager = FileManager.default
 
     /// Every iPod mounted right now, sorted by volume name.
     func scan() -> [IPodDevice] {
@@ -29,7 +30,7 @@ struct IPodDeviceScanner {
         let hashRequired = fileManager.fileExists(
             atPath: deviceDir.appendingPathComponent("SysInfoExtended").path)
         let databaseExists = fileManager.fileExists(
-            atPath: control.appendingPathComponent("iTunes/iTunesDB").path)
+            atPath: IPodDevice.databaseURL(onVolume: volume).path)
 
         return IPodDevice(
             volumeURL: volume,
