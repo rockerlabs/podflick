@@ -34,6 +34,7 @@ struct ITunesDB {
     struct Track {
         let offset: Int             // mhit position in the file
         let totalSize: Int          // donor cloning copies offset..<offset+totalSize
+        let section: Section        // enclosing mhsd — splices bump its size field
         let id: UInt32
         let title: String
         let path: String            // iPod-style, e.g. ":iPod_Control:Music:F16:JHBI.m4v"
@@ -42,8 +43,10 @@ struct ITunesDB {
         let dbid: UInt64
         let mediaType: UInt32       // 2 = movie
         let albumID: UInt32         // 0 = no album record
+        let headerSize: Int         // donor cloning patches fields within it
         let titleMhodRange: Range<Int>?   // rename splices this range
-        let pathMhodRange: Range<Int>?
+        let pathMhodRange: Range<Int>?    // parsed for symmetry; no splice consumes it yet
+        let kindMhodRange: Range<Int>?    // type 6; donor cloning copies it verbatim
     }
 
     struct PlaylistItem {
@@ -133,7 +136,8 @@ struct ITunesDB {
             case "mhlt":
                 try walkChildren(r, magic: "mhit", from: firstRecord,
                                  count: recordCount, limit: sectionEnd) {
-                    tracks.append(try parseTrack(r, at: $0, totalSize: $1))
+                    tracks.append(try parseTrack(r, at: $0, totalSize: $1,
+                                                 section: section))
                 }
             case "mhla":
                 try walkChildren(r, magic: "mhia", from: firstRecord,
@@ -167,7 +171,7 @@ struct ITunesDB {
     // MARK: - Record parsers
 
     private static func parseTrack(
-        _ r: Reader, at pos: Int, totalSize: Int
+        _ r: Reader, at pos: Int, totalSize: Int, section: Section
     ) throws -> Track {
         let headerSize = Int(try r.u32(pos + 4))
         guard headerSize >= minTrackHeader, headerSize <= totalSize else {
@@ -176,6 +180,7 @@ struct ITunesDB {
         }
         var title: (text: String, range: Range<Int>)?
         var path: (text: String, range: Range<Int>)?
+        var kind: Range<Int>?
         try walkChildren(r, magic: "mhod", from: pos + headerSize,
                          count: Int(try r.u32(pos + 0x0C)),
                          limit: pos + totalSize) { mhod, mhodTotal in
@@ -187,6 +192,8 @@ struct ITunesDB {
             case 2 where path == nil:
                 path = (try stringPayload(r, at: mhod, totalSize: mhodTotal),
                         mhod..<(mhod + mhodTotal))
+            case 6 where kind == nil:
+                kind = mhod..<(mhod + mhodTotal)
             default:
                 break
             }
@@ -194,6 +201,7 @@ struct ITunesDB {
         return Track(
             offset: pos,
             totalSize: totalSize,
+            section: section,
             id: try r.u32(pos + 0x10),
             title: title?.text ?? "",
             path: path?.text ?? "",
@@ -202,8 +210,10 @@ struct ITunesDB {
             dbid: try r.u64(pos + 0x70),
             mediaType: try r.u32(pos + 0xD0),
             albumID: try r.u32(pos + 0x120),
+            headerSize: headerSize,
             titleMhodRange: title?.range,
-            pathMhodRange: path?.range)
+            pathMhodRange: path?.range,
+            kindMhodRange: kind)
     }
 
     private static func parsePlaylist(
@@ -292,14 +302,21 @@ struct ITunesDB {
     }
 }
 
+extension Data {
+    /// Re-bases slices to zero-indexed storage (prefix/dropFirst/… keep the
+    /// parent's indices and would trap in subdata(in:)); whole buffers pass
+    /// through without a copy. The one shared rule for making offsets
+    /// absolute — Reader and ITunesDBWriter must never diverge on it.
+    var rebasedToZero: Data { startIndex == 0 ? self : Data(self) }
+}
+
 // MARK: - Bounds-checked little-endian reader
 
-private struct Reader {
+/// Shared by the parser and the splice writer (ITunesDBWriter).
+struct Reader {
     private let data: Data
 
-    // Re-base to zero-indexed storage: Data slices (prefix/dropFirst/…)
-    // keep their parent's indices and would trap in subdata(in:).
-    init(_ data: Data) { self.data = Data(data) }
+    init(_ data: Data) { self.data = data.rebasedToZero }
 
     private func check(_ offset: Int, count: Int) throws {
         guard offset >= 0, count >= 0, offset + count <= data.count else {

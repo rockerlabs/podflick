@@ -1,0 +1,142 @@
+import XCTest
+@testable import PodFlick
+
+/// B.2 splice-writer tests against the golden fixtures (CLAUDE.md
+/// Conventions): (b) add + remove returns a byte-identical DB; (c) rename
+/// reproduces the firmware-accepted fixture byte-exactly; plus structural
+/// checks of the add splice through the strict parser (a) — every mutation
+/// re-parses with full coverage, closing the byte round-trip.
+final class ITunesDBWriterTests: XCTestCase {
+
+    private let newVideo = ITunesDBWriter.NewTrack(
+        title: "tiny",
+        ipodPath: ":iPod_Control:Music:F07:TEST.m4v",
+        fileSize: 1_234_567,
+        durationMs: 90_000)
+    private let dbid: UInt64 = 0x1122_3344_5566_7788
+    private let itemDBID: UInt64 = 0x0102_0304_0506_0708
+    private let timestamp: UInt32 = 3_800_000_000   // fixed Mac-epoch time
+
+    // MARK: - (b) add + remove invariant
+
+    func testAddThenRemoveIsByteIdentical() throws {
+        for name in ["iTunesDB.single-video", "iTunesDB.four-videos"] {
+            let original = try fixture(name)
+            var writer = try ITunesDBWriter(original)
+            let trackID = try writer.add(newVideo, dbid: dbid,
+                                         itemDBID: itemDBID,
+                                         timestamp: timestamp)
+            XCTAssertNotEqual(writer.data, original, name)
+            try writer.remove(trackID: trackID)
+            XCTAssertEqual(writer.data, original, name)
+        }
+    }
+
+    func testTwoAddsThenRemovesAreByteIdentical() throws {
+        let original = try fixture("iTunesDB.four-videos")
+        var writer = try ITunesDBWriter(original)
+        let first = try writer.add(newVideo, dbid: dbid,
+                                   itemDBID: itemDBID, timestamp: timestamp)
+        var second = newVideo
+        second.title = "tiny 2"
+        let secondID = try writer.add(second, dbid: dbid &+ 1,
+                                      itemDBID: itemDBID &+ 1,
+                                      timestamp: timestamp)
+        // The second add counts the first clone's ids: item id (+3) is the
+        // new maximum, so the next track id is that +2.
+        XCTAssertEqual(secondID, first + 3)
+        try writer.remove(trackID: secondID)
+        try writer.remove(trackID: first)
+        XCTAssertEqual(writer.data, original)
+    }
+
+    // MARK: - add splice structure (checked through the strict parser)
+
+    func testAddClonesDonorAtEndOfLists() throws {
+        var writer = try ITunesDBWriter(try fixture("iTunesDB.four-videos"))
+        let original = writer.db
+        let trackID = try writer.add(newVideo, dbid: dbid,
+                                     itemDBID: itemDBID, timestamp: timestamp)
+
+        // Ids follow the proven pattern: max used id +2, item id +3. The
+        // golden fixture's max used id is 69 (the master playlists' last
+        // mhip item id).
+        XCTAssertEqual(trackID, 71)
+
+        let db = writer.db
+        XCTAssertEqual(db.tracks.count, 5)
+        let added = try XCTUnwrap(db.tracks.last)
+        XCTAssertEqual(added.id, trackID)
+        XCTAssertEqual(added.title, newVideo.title)
+        XCTAssertEqual(added.path, newVideo.ipodPath)
+        XCTAssertEqual(added.fileSize, newVideo.fileSize)
+        XCTAssertEqual(added.durationMs, newVideo.durationMs)
+        XCTAssertEqual(added.dbid, dbid)
+        XCTAssertEqual(added.mediaType, 2)
+        XCTAssertEqual(added.albumID, 0, "clone must not reference an album")
+
+        // The kind mhod is the donor's ("День выборов", album id 0), verbatim.
+        let donor = try XCTUnwrap(db.tracks.first { $0.title == "День выборов" })
+        XCTAssertEqual(writer.data.subdata(in: try XCTUnwrap(added.kindMhodRange)),
+                       writer.data.subdata(in: try XCTUnwrap(donor.kindMhodRange)))
+
+        // One cloned mhip at the end of BOTH master-playlist copies.
+        XCTAssertEqual(db.masterPlaylists.count, 2)
+        for master in db.masterPlaylists {
+            XCTAssertEqual(master.items.count, 5)
+            let item = try XCTUnwrap(master.items.last)
+            XCTAssertEqual(item.trackID, trackID)
+            XCTAssertEqual(item.itemID, trackID + 1)
+            XCTAssertEqual(item.trackDBID, dbid)
+        }
+
+        // Albums, smart playlists and indexes are never touched.
+        XCTAssertEqual(db.albums.count, original.albums.count)
+        XCTAssertEqual(db.smartPlaylists.map(\.title),
+                       original.smartPlaylists.map(\.title))
+    }
+
+    // MARK: - (c) rename patch against the firmware-accepted fixture
+
+    func testRenameRoundTripMatchesAcceptedFixture() throws {
+        // iTunesDB.four-videos is the DB the firmware accepted AFTER the
+        // on-device rename splice wrote the «День выборов» title mhod.
+        // Renaming away and back must land on those exact bytes.
+        let original = try fixture("iTunesDB.four-videos")
+        var writer = try ITunesDBWriter(original)
+        let target = try XCTUnwrap(
+            writer.db.tracks.first { $0.title == "День выборов" })
+
+        try writer.rename(trackID: target.id, to: "Election Day (extended)")
+        XCTAssertNotEqual(writer.data, original)
+        let renamed = try XCTUnwrap(
+            writer.db.tracks.first { $0.id == target.id })
+        XCTAssertEqual(renamed.title, "Election Day (extended)")
+        XCTAssertEqual(renamed.path, target.path, "rename must not touch the path")
+        XCTAssertEqual(writer.db.tracks.count, 4)
+
+        try writer.rename(trackID: target.id, to: "День выборов")
+        XCTAssertEqual(writer.data, original)
+    }
+
+    func testRenameRoundTripOnFinderWrittenTitle() throws {
+        // The single-video fixture's title mhod was written by Finder itself;
+        // a shrinking rename and the rename back must reproduce it exactly.
+        let original = try fixture("iTunesDB.single-video")
+        var writer = try ITunesDBWriter(original)
+        let track = try XCTUnwrap(writer.db.tracks.first)
+
+        try writer.rename(trackID: track.id, to: "K")
+        XCTAssertEqual(writer.db.tracks.first?.title, "K")
+        try writer.rename(trackID: track.id, to: track.title)
+        XCTAssertEqual(writer.data, original)
+    }
+
+    // MARK: - Unknown ids
+
+    func testMutatingUnknownTrackThrows() throws {
+        var writer = try ITunesDBWriter(try fixture("iTunesDB.single-video"))
+        XCTAssertThrowsError(try writer.rename(trackID: 999_999, to: "x"))
+        XCTAssertThrowsError(try writer.remove(trackID: 999_999))
+    }
+}
