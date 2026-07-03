@@ -22,23 +22,9 @@ final class FFmpegIntegrationTests: XCTestCase {
         if let workDir { try FileManager.default.removeItem(at: workDir) }
     }
 
-    /// 1s 320×240 test pattern + 440 Hz tone, with a source title tag that
-    /// must NOT survive the conversion.
     private func makeSourceClip() throws -> URL {
-        let source = workDir.appendingPathComponent("source clip.mp4")
-        let generate = Process()
-        generate.executableURL = tools.ffmpeg
-        generate.arguments = [
-            "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=30",
-            "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
-            "-c:v", "libx264", "-c:a", "aac",
-            "-metadata", "title=legacy source title",
-            "-loglevel", "error", "-y", source.path,
-        ]
-        try generate.run()
-        generate.waitUntilExit()
-        XCTAssertEqual(generate.terminationStatus, 0, "test clip generation failed")
-        return source
+        try makeTestClip(tools: tools,
+                         at: workDir.appendingPathComponent("source clip.mp4"))
     }
 
     func testProbeReadsRealFile() async throws {
