@@ -132,6 +132,24 @@ final class ITunesDBWriterTests: XCTestCase {
         XCTAssertEqual(writer.data, original)
     }
 
+    func testRenameToUnalignedTitleWritesExactMhodSize() throws {
+        // Firmware-facing regression (B.5.1 device smoke, 2026-07-04): a
+        // title whose UTF-16 byte length is not 4-aligned must produce an
+        // EXACT-size mhod (0x18+16+len). The old `(…+3)&~3` rounding wrote
+        // 2 trailing pad bytes and the firmware answered with empty menus;
+        // Finder itself writes unaligned totals (86, 118 in the fixtures).
+        var writer = try ITunesDBWriter(try fixture("iTunesDB.four-videos"))
+        let target = try XCTUnwrap(writer.db.tracks.first)
+
+        try writer.rename(trackID: target.id, to: "111")   // 6 UTF-16 bytes
+        let renamed = try XCTUnwrap(
+            writer.db.tracks.first { $0.id == target.id })
+        XCTAssertEqual(renamed.title, "111")
+        let range = try XCTUnwrap(renamed.titleMhodRange)
+        XCTAssertEqual(range.count, 0x18 + 16 + 6,
+                       "title mhod must be exact-size, never padded")
+    }
+
     // MARK: - Unknown ids
 
     func testMutatingUnknownTrackThrows() throws {
