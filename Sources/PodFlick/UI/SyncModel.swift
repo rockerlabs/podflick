@@ -69,6 +69,8 @@ final class SyncModel: ObservableObject {
     /// rename, eject); the queue reports its failures on the item instead.
     @Published var deviceError: String?
     @Published private(set) var ejectTask: Task<Void, Never>?
+    /// Most recent remove/rename/prefs write; kept for the test hook below.
+    private var deviceWriteTask: Task<Void, Never>?
 
     let tools: FFmpegTools?
     private let scanner: IPodDeviceScanner
@@ -207,7 +209,9 @@ final class SyncModel: ObservableObject {
 
             set(.converting(0))
             try await converter.convert(item.sourceURL, to: temp,
-                                        title: item.title, probe: probe) { fraction in
+                                        title: item.title,
+                                        profile: device.videoProfile,
+                                        probe: probe) { fraction in
                 Task { @MainActor [weak self] in
                     self?.setStage(.converting(fraction), for: id)
                 }
@@ -290,31 +294,54 @@ final class SyncModel: ObservableObject {
         while let ejectTask { await ejectTask.value }
     }
 
-    // MARK: - Remove / rename
+    // MARK: - Remove / rename / settings
 
     func remove(_ video: IPodLibrary.Video) {
-        performDeviceWrite { try $0.remove(trackID: video.id) }
+        performDeviceWrite { try IPodLibrary(volumeURL: $0).remove(trackID: video.id) }
     }
 
     func rename(_ video: IPodLibrary.Video, to newTitle: String) {
         let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty, title != video.title else { return }
-        performDeviceWrite { try $0.rename(trackID: video.id, to: title) }
+        performDeviceWrite { try IPodLibrary(volumeURL: $0).rename(trackID: video.id, to: title) }
     }
 
+    /// Persists the conversion profile for the SELECTED device (on the
+    /// device itself, so it follows the hardware). Applies to conversions
+    /// started after the change; already-queued items pick it up because
+    /// `process` re-reads the device per item.
+    /// No equality guard against the device snapshot: it goes stale while
+    /// a write is in flight and would silently drop a quick second toggle.
+    /// The write is idempotent and serialized by the queue anyway.
+    func setVideoProfile(_ profile: VideoProfile) {
+        performDeviceWrite { volume in
+            var prefs = DevicePrefs.load(volumeURL: volume)
+            prefs.videoProfile = profile
+            try prefs.save(volumeURL: volume)
+        }
+    }
+
+    /// Runs one device write through the eject gate, surfaces its error,
+    /// and rescans (list, free space and prefs may all have changed).
     private func performDeviceWrite(
-        _ body: @escaping @Sendable (IPodLibrary) throws -> Void
+        _ body: @escaping @Sendable (URL) throws -> Void
     ) {
         guard let device = selectedDevice else { return }
-        let library = IPodLibrary(volumeURL: device.volumeURL)
-        Task {
+        let volume = device.volumeURL
+        deviceWriteTask = Task {
             do {
-                try await writeQueue.run { try body(library) }
+                try await writeQueue.run { try body(volume) }
             } catch {
                 deviceError = "\(error)"
             }
             refreshDevices()
         }
+    }
+
+    /// Test hook: resolves once the most recently started remove/rename/
+    /// prefs write (and its rescan) has finished.
+    func waitUntilDeviceWriteFinished() async {
+        await deviceWriteTask?.value
     }
 
     // MARK: - Error rendering
