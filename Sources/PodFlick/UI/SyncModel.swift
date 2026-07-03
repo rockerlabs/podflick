@@ -6,10 +6,28 @@ import Foundation
 /// load-splice-write cycles on the same file would silently drop one of
 /// them (e.g. a queue upload racing a user's remove), so adds, removes and
 /// renames all funnel through this one actor.
+///
+/// The queue is also the eject gate: `close()` doubles as a barrier (the
+/// actor is non-reentrant through the synchronous `run` body, so by the
+/// time it returns any in-flight write has finished) and every later `run`
+/// is rejected until `reopen()` — writers are excluded by the mechanism
+/// they already funnel through, not by per-callsite flags.
 actor DeviceWriteQueue {
-    func run<T: Sendable>(_ body: @Sendable () throws -> T) rethrows -> T {
-        try body()
+    struct ClosedForEject: Error, CustomStringConvertible {
+        var description: String {
+            "eject in progress — reconnect the iPod to make changes"
+        }
     }
+
+    private var isClosed = false
+
+    func run<T: Sendable>(_ body: @Sendable () throws -> T) throws -> T {
+        guard !isClosed else { throw ClosedForEject() }
+        return try body()
+    }
+
+    func close() { isClosed = true }
+    func reopen() { isClosed = false }
 }
 
 /// UI state for the whole app: connected devices, the upload queue with
@@ -48,13 +66,17 @@ final class SyncModel: ObservableObject {
     @Published private(set) var queue: [QueueItem] = []
     @Published private(set) var deviceVideos: [IPodLibrary.Video] = []
     /// Last failed device read/write outside the queue (list load, remove,
-    /// rename); the queue reports its failures on the item instead.
+    /// rename, eject); the queue reports its failures on the item instead.
     @Published var deviceError: String?
+    @Published private(set) var ejectTask: Task<Void, Never>?
 
     let tools: FFmpegTools?
     private let scanner: IPodDeviceScanner
+    private let ejector: IPodEjector
     private let writeQueue = DeviceWriteQueue()
     private var worker: Task<Void, Never>?
+
+    var isEjecting: Bool { ejectTask != nil }
 
     var selectedDevice: IPodDevice? {
         devices.first { $0.volumeURL == selectedVolume }
@@ -64,15 +86,22 @@ final class SyncModel: ObservableObject {
     /// existing DB (donor-clone splicing cannot start from an empty one —
     /// the first sync of a fresh iPod must come from Finder).
     var canAcceptDrops: Bool {
-        guard let device = selectedDevice else { return false }
+        guard let device = selectedDevice, !isEjecting else { return false }
         return tools != nil && device.isSupported && device.databaseExists
+    }
+
+    /// True while any queued item is still moving toward the device.
+    var queueIsBusy: Bool {
+        queue.contains { !$0.stage.isFinished }
     }
 
     init(scanner: IPodDeviceScanner = IPodDeviceScanner(),
          tools: FFmpegTools? = FFmpegTools.locate(),
+         ejector: IPodEjector = IPodEjector(),
          observeVolumeMounts: Bool = true) {
         self.scanner = scanner
         self.tools = tools
+        self.ejector = ejector
         if observeVolumeMounts {
             let center = NSWorkspace.shared.notificationCenter
             for name in [NSWorkspace.didMountNotification,
@@ -225,6 +254,40 @@ final class SyncModel: ObservableObject {
               // final state to a stale "Copying 87%".
               !queue[index].stage.isFinished else { return }
         queue[index].stage = stage
+    }
+
+    // MARK: - Eject
+
+    /// Sync + clean eject of the selected device (never forced). Refused
+    /// while uploads run — an eject mid-copy would strand a half-written
+    /// file. On success the didUnmount notification drives the device-list
+    /// refresh; on failure nothing on the device changed.
+    func eject() {
+        guard let device = selectedDevice, !isEjecting else { return }
+        guard !queueIsBusy else {
+            deviceError = "uploads in progress — wait for the queue to finish before ejecting"
+            return
+        }
+        deviceError = nil
+        let volume = device.volumeURL
+        ejectTask = Task {
+            // close() is both the barrier for a remove/rename fired just
+            // before the eject click and the gate rejecting writes for the
+            // eject's duration.
+            await writeQueue.close()
+            do {
+                try await ejector.eject(volume: volume)
+            } catch {
+                deviceError = "\(error)"
+            }
+            await writeQueue.reopen()   // other connected iPods stay writable
+            ejectTask = nil
+        }
+    }
+
+    /// Test hook: resolves once a running eject has finished.
+    func waitUntilEjectFinished() async {
+        while let ejectTask { await ejectTask.value }
     }
 
     // MARK: - Remove / rename
