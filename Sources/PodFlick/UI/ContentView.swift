@@ -168,6 +168,19 @@ private struct DeviceHeaderView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            if let device = model.selectedDevice, device.isSupported {
+                Picker("Video quality", selection: profileBinding) {
+                    ForEach(VideoProfile.allCases, id: \.self) { profile in
+                        Text(profile.displayName).tag(profile)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+                .help("Conversion size for this iPod. 640×480 plays only on "
+                    + "a 5.5G — a 5G shows a black screen. Stored on the "
+                    + "device; new uploads use it, existing videos keep theirs.")
+                .disabled(model.isEjecting)
+            }
             if model.devices.count > 1 {
                 Picker("Device", selection: $model.selectedVolume) {
                     ForEach(model.devices, id: \.volumeURL) { device in
@@ -200,6 +213,13 @@ private struct DeviceHeaderView: View {
             .help("Rescan for iPods")
         }
         .padding(12)
+    }
+
+    /// The device snapshot is the single source of truth; a set rewrites
+    /// the on-device prefs and comes back via the rescan.
+    private var profileBinding: Binding<VideoProfile> {
+        Binding(get: { model.selectedDevice?.videoProfile ?? .standard },
+                set: { model.setVideoProfile($0) })
     }
 
     private func subtitle(for device: IPodDevice) -> String {

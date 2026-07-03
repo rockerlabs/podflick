@@ -1,12 +1,9 @@
 import Foundation
 
-/// Transcodes arbitrary video into the iPod 5G envelope: H.264 Baseline
-/// ≤320×240 ≤768 kbps ≤L1.3 ≤30fps + AAC-LC stereo, in an .m4v container
-/// (docs/itunesdb-format.md, "Video file requirements").
-///
-/// This is deliberately the 5G limit, not the 5.5G one: it plays on both
-/// generations, while `reference/convert_to_ipod.sh`'s 640×480 L3.0 output
-/// gave a black screen on the real 5G (B.5.1 smoke, 2026-07-04).
+/// Transcodes arbitrary video into an iPod-playable .m4v: H.264 Baseline
+/// ≤30fps + AAC-LC stereo (docs/itunesdb-format.md, "Video file
+/// requirements"), sized per the target device's `VideoProfile` —
+/// 320×240 by default, 640×480 for devices opted into the 5.5G profile.
 struct IPodVideoConverter {
 
     enum ConversionError: Error, Equatable {
@@ -45,6 +42,7 @@ struct IPodVideoConverter {
     /// `onProgress` fires only when the fraction changes, on the
     /// stdout-reading task — UI consumers hop to the main actor themselves.
     func convert(_ input: URL, to output: URL, title: String,
+                 profile: VideoProfile = .standard,
                  probe: VideoProbe,
                  onProgress: @escaping @Sendable (Double) -> Void = { _ in }) async throws {
         var parser = ProgressParser()
@@ -53,7 +51,7 @@ struct IPodVideoConverter {
             let result = try await Self.run(
                 tools.ffmpeg,
                 arguments: Self.conversionArguments(input: input, output: output,
-                                                    title: title)
+                                                    title: title, profile: profile)
             ) { line in
                 parser.consume(line: line)
                 let fraction = parser.fraction(ofTotal: probe.durationSeconds)
@@ -75,8 +73,8 @@ struct IPodVideoConverter {
 
     /// The full ffmpeg invocation for one file. Pure, so tests can pin it
     /// against the proven recipe.
-    static func conversionArguments(input: URL, output: URL,
-                                    title: String) -> [String] {
+    static func conversionArguments(input: URL, output: URL, title: String,
+                                    profile: VideoProfile = .standard) -> [String] {
         [
             "-i", input.path,
             // Legacy sources carry pre-UTF-8 tags (a Windows-1251 ©nam gave
@@ -86,20 +84,20 @@ struct IPodVideoConverter {
             // The firmware plays one video + one audio track; subtitle/data
             // streams would otherwise be muxed into the .m4v.
             "-sn", "-dn",
-            // iPod 5G H.264 hardware-decoder limits: ≤320×240, baseline
-            // ≤L1.3, ≤768 kbps. Every file proven playing on the device
-            // fits this; the reference recipe's 640×480 L3.0 (the 5.5G
-            // profile) decodes to a black screen on the 5G (B.5.1 smoke,
-            // 2026-07-04). A per-device 5.5G profile is a backlog item.
+            // Hardware-decoder limits live in VideoProfile: the 5G-safe
+            // default (≤320×240, baseline ≤L1.3, ≤768 kbps — proven in the
+            // B.5.1 smoke) or the opt-in 5.5G envelope (≤640×480, ≤L3.0,
+            // ≤1.5 Mbps — decodes BLACK on a real 5G).
             "-c:v", "libx264",
             "-profile:v", "baseline",
-            "-level", "1.3",
+            "-level", profile.h264Level,
             "-pix_fmt", "yuv420p",
-            "-vf", "scale=320:240:force_original_aspect_ratio=decrease,"
+            "-vf", "scale=\(profile.maxWidth):\(profile.maxHeight)"
+                 + ":force_original_aspect_ratio=decrease,"
                  + "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-            "-b:v", "700k",
-            "-maxrate", "768k",
-            "-bufsize", "1536k",
+            "-b:v", profile.videoBitrate,
+            "-maxrate", profile.videoMaxrate,
+            "-bufsize", profile.videoBufsize,
             "-r", "30",
             "-c:a", "aac",
             "-b:a", "128k",
