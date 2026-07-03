@@ -122,6 +122,21 @@ final class ConvertTests: XCTestCase {
             title: "Old Title"))
     }
 
+    func testProbeDecodingRejectsCoverArtAsVideo() {
+        // MP3/M4A album art is a "video" stream with disposition
+        // attached_pic — it must not defeat the audio-file rejection.
+        let json = Data("""
+            {"streams": [
+               {"codec_type": "video", "codec_name": "png",
+                "disposition": {"attached_pic": 1}},
+               {"codec_type": "audio", "codec_name": "mp3"}],
+             "format": {"duration": "10.0"}}
+            """.utf8)
+        XCTAssertThrowsError(try VideoProbe.decode(ffprobeJSON: json)) {
+            XCTAssertEqual($0 as? VideoProbe.ProbeError, .noVideoStream)
+        }
+    }
+
     func testProbeDecodingRejectsAudioOnly() {
         let json = Data("""
             {"streams": [{"codec_type": "audio", "codec_name": "mp3"}],

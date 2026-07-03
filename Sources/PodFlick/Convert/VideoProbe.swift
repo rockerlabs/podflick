@@ -29,7 +29,12 @@ struct VideoProbe: Equatable {
         let raw = try decoder.decode(RawProbe.self, from: data)
 
         let streams = raw.streams ?? []
-        guard let video = streams.first(where: { $0.codecType == "video" }),
+        // Embedded cover art (MP3/M4A album art) is reported as a "video"
+        // stream too, distinguished only by disposition.attached_pic —
+        // without this check an audio file with artwork passes as video.
+        guard let video = streams.first(where: {
+                  $0.codecType == "video" && $0.disposition?.attachedPic != 1
+              }),
               let videoCodec = video.codecName
         else { throw ProbeError.noVideoStream }
         guard let text = raw.format?.duration, let duration = Double(text),
@@ -49,11 +54,15 @@ struct VideoProbe: Equatable {
 
     private struct RawProbe: Decodable {
         struct Stream: Decodable {
+            struct Disposition: Decodable {
+                var attachedPic: Int?
+            }
             var codecType: String?
             var codecName: String?
             var profile: String?
             var width: Int?
             var height: Int?
+            var disposition: Disposition?
         }
         struct Format: Decodable {
             var duration: String?

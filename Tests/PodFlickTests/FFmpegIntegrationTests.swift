@@ -81,6 +81,27 @@ final class FFmpegIntegrationTests: XCTestCase {
         XCTAssertEqual(result.title, "Чистый заголовок")
     }
 
+    func testCancelledConversionThrowsCancellationError() async throws {
+        let source = try makeSourceClip()
+        let output = workDir.appendingPathComponent("cancelled.m4v")
+        let converter = IPodVideoConverter(tools: tools)
+        let sourceProbe = try await converter.probe(source)
+
+        let task = Task {
+            try await converter.convert(source, to: output, title: "X",
+                                        probe: sourceProbe)
+        }
+        task.cancel()
+        do {
+            try await task.value
+            XCTFail("cancelled conversion must throw")
+        } catch is CancellationError {
+            // The user's cancel must not masquerade as an ffmpeg failure.
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: output.path),
+                       "cancelled output must be removed")
+    }
+
     func testConvertFailureCleansUpAndReportsStderr() async throws {
         let source = workDir.appendingPathComponent("not-a-video.mp4")
         try Data("junk".utf8).write(to: source)
