@@ -33,6 +33,11 @@ struct IPodDeviceScanner {
             atPath: IPodDevice.databaseURL(onVolume: volume).path)
         let sysInfo = keyValueFields(at: deviceDir.appendingPathComponent("SysInfo"))
         let rockbox = rockbox(onVolume: volume)
+        // NSURL caches volume resource values per instance (purged only at
+        // run-loop checkpoints); drop the cache so a same-tick re-inspect of
+        // a stored URL — e.g. the pre-copy free-space re-check — reads fresh.
+        var volume = volume
+        volume.removeAllCachedResourceValues()
         let resources = try? volume.resourceValues(forKeys:
             [.volumeLocalizedFormatDescriptionKey, .volumeTotalCapacityKey,
              .volumeAvailableCapacityKey])
@@ -81,8 +86,8 @@ struct IPodDeviceScanner {
     /// human-readable version is worth showing; a bare hex build ID is not.
     private func firmwareVersion(sysInfo: [String: String]) -> String? {
         guard let value = sysInfo["visibleBuildID"],
-              let open = value.lastIndex(of: "("),
-              let close = value.lastIndex(of: ")"), open < close else { return nil }
+              let open = value.firstIndex(of: "("),
+              let close = value.firstIndex(of: ")"), open < close else { return nil }
         let version = value[value.index(after: open)..<close]
             .trimmingCharacters(in: .whitespaces)
         return version.isEmpty ? nil : version
