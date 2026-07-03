@@ -33,6 +33,43 @@ func install(database: Data, onVolume volume: URL) throws {
     try database.write(to: iTunesDir.appendingPathComponent("iTunesDB"))
 }
 
+/// Thread-safe recorder for @Sendable test seams (unmount spies, progress
+/// callbacks) to append to from any thread.
+final class Recorder<Element>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var elements: [Element] = []
+
+    func append(_ element: Element) {
+        lock.lock(); defer { lock.unlock() }
+        elements.append(element)
+    }
+
+    var recorded: [Element] {
+        lock.lock(); defer { lock.unlock() }
+        return elements
+    }
+}
+
+/// Stub `IPodEjector`: no real cache flush, near-zero retry delay, and an
+/// unmount seam that records into `unmounts` and fails the first
+/// `failFirst` attempts with a "volume is busy" error (`.max` = always).
+func makeStubEjector(unmounts: Recorder<URL>, failFirst: Int = 0,
+                     maxAttempts: Int = 5,
+                     onFlush: @escaping @Sendable () -> Void = {}) -> IPodEjector {
+    var ejector = IPodEjector()
+    ejector.maxAttempts = maxAttempts
+    ejector.retryDelay = .milliseconds(1)
+    ejector.flushFileCaches = onFlush
+    ejector.unmount = { url in
+        unmounts.append(url)
+        if unmounts.recorded.count <= failFirst {
+            throw NSError(domain: "test", code: 1, userInfo:
+                [NSLocalizedDescriptionKey: "volume is busy"])
+        }
+    }
+    return ejector
+}
+
 struct TestClipError: Error {}
 
 /// 1s 320×240 test pattern + 440 Hz tone at `url`, with a source title tag

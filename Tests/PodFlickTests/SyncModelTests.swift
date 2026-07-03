@@ -36,9 +36,10 @@ final class SyncModelTests: XCTestCase {
         return volume
     }
 
-    private func makeModel(tools: FFmpegTools? = nil) -> SyncModel {
+    private func makeModel(tools: FFmpegTools? = nil,
+                           ejector: IPodEjector = IPodEjector()) -> SyncModel {
         SyncModel(scanner: IPodDeviceScanner(volumesDirectory: volumesRoot),
-                  tools: tools, observeVolumeMounts: false)
+                  tools: tools, ejector: ejector, observeVolumeMounts: false)
     }
 
     // MARK: - Device selection
@@ -128,6 +129,56 @@ final class SyncModelTests: XCTestCase {
 
         model.clearFinished()
         XCTAssertTrue(model.queue.isEmpty)
+    }
+
+    // MARK: - Eject
+
+    func testEjectUnmountsSelectedVolume() async throws {
+        let volume = try makeVolume("IPOD")
+        let unmounts = Recorder<URL>()
+        let model = makeModel(ejector: makeStubEjector(unmounts: unmounts))
+
+        model.eject()
+        XCTAssertTrue(model.isEjecting)
+        await model.waitUntilEjectFinished()
+
+        // The scanner reports /private/var/... where the test dir says
+        // /var/... — compare symlink-resolved paths, not raw URLs.
+        XCTAssertEqual(unmounts.recorded.map { $0.resolvingSymlinksInPath().path },
+                       [volume.resolvingSymlinksInPath().path])
+        XCTAssertFalse(model.isEjecting)
+        XCTAssertNil(model.deviceError)
+    }
+
+    func testEjectFailureSurfacesDeviceError() async throws {
+        try makeVolume("IPOD")
+        let unmounts = Recorder<URL>()
+        let model = makeModel(ejector: makeStubEjector(unmounts: unmounts,
+                                                       failFirst: .max,
+                                                       maxAttempts: 2))
+
+        model.eject()
+        await model.waitUntilEjectFinished()
+
+        XCTAssertEqual(unmounts.recorded.count, 2, "maxAttempts retries")
+        XCTAssertFalse(model.isEjecting)
+        XCTAssertTrue(try XCTUnwrap(model.deviceError).contains("could not eject"))
+    }
+
+    func testEjectRefusedWhileQueueIsBusy() throws {
+        try makeVolume("IPOD")
+        let unmounts = Recorder<URL>()
+        let model = makeModel(ejector: makeStubEjector(unmounts: unmounts))
+
+        // Freshly enqueued items sit in .waiting until the worker's first
+        // suspension resolves, so the queue is deterministically busy here.
+        model.enqueue([volumesRoot.appendingPathComponent("a.mp4")])
+        XCTAssertTrue(model.queueIsBusy)
+        model.eject()
+
+        XCTAssertFalse(model.isEjecting)
+        XCTAssertTrue(unmounts.recorded.isEmpty)
+        XCTAssertTrue(try XCTUnwrap(model.deviceError).contains("uploads in progress"))
     }
 
     // MARK: - Error rendering
