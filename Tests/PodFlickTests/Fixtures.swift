@@ -12,3 +12,13 @@ func fixture(_ name: String) throws -> Data {
         .appendingPathComponent("reference/fixtures")
         .appendingPathComponent(name))
 }
+
+/// Creates a unique scratch directory for one test; the caller removes it
+/// in tearDown/defer.
+func makeTempDirectory(prefix: String) throws -> URL {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("\(prefix)-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: url,
+                                            withIntermediateDirectories: true)
+    return url
+}
