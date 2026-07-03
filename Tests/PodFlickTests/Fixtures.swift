@@ -24,6 +24,15 @@ func makeTempDirectory(prefix: String) throws -> URL {
     return url
 }
 
+/// Writes `database` as the iTunesDB of a fake iPod volume, creating the
+/// iPod_Control/iTunes tree. Shared by every test that fakes a device.
+func install(database: Data, onVolume volume: URL) throws {
+    let iTunesDir = volume.appendingPathComponent("iPod_Control/iTunes")
+    try FileManager.default.createDirectory(
+        at: iTunesDir, withIntermediateDirectories: true)
+    try database.write(to: iTunesDir.appendingPathComponent("iTunesDB"))
+}
+
 struct TestClipError: Error {}
 
 /// 1s 320×240 test pattern + 440 Hz tone at `url`, with a source title tag

@@ -122,10 +122,19 @@ final class SyncModel: ObservableObject {
         }
         guard !incoming.isEmpty else { return }
         queue.append(contentsOf: incoming)
-        if worker == nil {
-            worker = Task {
-                await processQueue()
-                worker = nil
+        startWorkerIfIdle()
+    }
+
+    private func startWorkerIfIdle() {
+        guard worker == nil else { return }
+        worker = Task {
+            await processQueue()
+            worker = nil
+            // An enqueue between processQueue's last empty-check and the
+            // line above saw a live worker and didn't start one — without
+            // this re-check its items would sit in .waiting forever.
+            if queue.contains(where: { $0.stage == .waiting }) {
+                startWorkerIfIdle()
             }
         }
     }
@@ -210,7 +219,11 @@ final class SyncModel: ObservableObject {
     }
 
     private func setStage(_ stage: Stage, for id: UUID) {
-        guard let index = queue.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = queue.firstIndex(where: { $0.id == id }),
+              // Progress callbacks hop to the main actor as detached Tasks
+              // and can land AFTER the item finished — never regress a
+              // final state to a stale "Copying 87%".
+              !queue[index].stage.isFinished else { return }
         queue[index].stage = stage
     }
 

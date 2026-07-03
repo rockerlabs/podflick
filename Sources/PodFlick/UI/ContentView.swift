@@ -210,9 +210,16 @@ private struct QueueSectionView: View {
                         .buttonStyle(.link)
                 }
             }
-            ForEach(model.queue) { item in
-                QueueRowView(item: item)
+            // Scrolls so a big multi-file drop can't squeeze the video
+            // list out of the window.
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 6) {
+                    ForEach(model.queue) { item in
+                        QueueRowView(item: item)
+                    }
+                }
             }
+            .frame(maxHeight: 180)
         }
         .padding(12)
     }

@@ -19,12 +19,8 @@ final class SyncPipelineIntegrationTests: XCTestCase {
         tools = located
         volumesRoot = try makeTempDirectory(prefix: "PodFlickPipeline")
 
-        let iTunes = volumesRoot
-            .appendingPathComponent("IPOD/iPod_Control/iTunes")
-        try FileManager.default.createDirectory(
-            at: iTunes, withIntermediateDirectories: true)
-        try fixture("iTunesDB.four-videos")
-            .write(to: iTunes.appendingPathComponent("iTunesDB"))
+        try install(database: try fixture("iTunesDB.four-videos"),
+                    onVolume: volumesRoot.appendingPathComponent("IPOD"))
 
         model = SyncModel(
             scanner: IPodDeviceScanner(volumesDirectory: volumesRoot),

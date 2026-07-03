@@ -110,6 +110,13 @@ struct IPodLibrary {
 
     func rename(trackID: UInt32, to newTitle: String) throws {
         var writer = try ITunesDBWriter(try Data(contentsOf: databaseURL))
+        // Same invariant as add: titles are the dedup key, and two
+        // identical Videos-menu entries are indistinguishable on device.
+        guard !writer.db.tracks.contains(where: {
+            $0.title == newTitle && $0.id != trackID
+        }) else {
+            throw LibraryError.duplicateTitle(newTitle)
+        }
         try writer.rename(trackID: trackID, to: newTitle)
         try backUpDatabase()
         try writer.data.write(to: databaseURL, options: .atomic)
