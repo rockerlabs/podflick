@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var videoToRename: IPodLibrary.Video?
     @State private var renameTitle = ""
     @State private var videoToRemove: IPodLibrary.Video?
+    @State private var showCleanUpConfirmation = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,6 +44,25 @@ struct ContentView: View {
         } message: { _ in
             Text("Deletes the video file and its database entry. The DB is backed up first.")
         }
+        .confirmationDialog("Delete orphaned files?",
+                            isPresented: $showCleanUpConfirmation) {
+            Button("Delete \(model.orphans.count) "
+                 + (model.orphans.count == 1 ? "file" : "files"),
+                   role: .destructive) {
+                model.cleanUpOrphans()
+            }
+        } message: {
+            Text("The database is not touched — these files are not part "
+               + "of it:\n" + orphanFileList)
+        }
+    }
+
+    /// First few orphan names for the confirmation dialog.
+    private var orphanFileList: String {
+        let names = model.orphans.map(\.name)
+        let shown = names.prefix(5).joined(separator: ", ")
+        let more = names.count - 5
+        return more > 0 ? "\(shown) and \(more) more" : shown
     }
 
     // MARK: - Banners
@@ -62,9 +82,24 @@ struct ContentView: View {
                                + "with Finder first", style: .warning)
             }
         }
-        if let error = model.deviceError {
-            BannerView(text: error, style: .error) { model.deviceError = nil }
+        if !model.orphans.isEmpty {
+            BannerView(text: orphanSummary, style: .warning,
+                       actionTitle: "Clean Up…",
+                       onAction: { showCleanUpConfirmation = true })
         }
+        if let error = model.deviceError {
+            BannerView(text: error, style: .error, onDismiss: { model.deviceError = nil })
+        }
+    }
+
+    /// "3 files (812 MB) on IPOD are not referenced by the database …"
+    private var orphanSummary: String {
+        let count = model.orphans.count
+        let size = Formatters.bytes(model.orphans.reduce(0) { $0 + $1.fileSize })
+        let device = model.selectedDevice?.name ?? "iPod"
+        return "\(count) \(count == 1 ? "file" : "files") (\(size)) on \(device) "
+             + "\(count == 1 ? "is" : "are") not referenced by the database — "
+             + "invisible on the device, wasting space"
     }
 
     // MARK: - Video list
@@ -352,6 +387,8 @@ private struct BannerView: View {
 
     let text: String
     let style: Style
+    var actionTitle: String? = nil
+    var onAction: (() -> Void)? = nil
     var onDismiss: (() -> Void)? = nil
 
     var body: some View {
@@ -361,6 +398,10 @@ private struct BannerView: View {
                   : "exclamationmark.triangle.fill")
             Text(text).lineLimit(3)
             Spacer()
+            if let actionTitle, let onAction {
+                Button(actionTitle, action: onAction)
+                    .buttonStyle(.link)
+            }
             if let onDismiss {
                 Button("Dismiss", action: onDismiss)
                     .buttonStyle(.link)

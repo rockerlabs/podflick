@@ -65,6 +65,8 @@ final class SyncModel: ObservableObject {
     }
     @Published private(set) var queue: [QueueItem] = []
     @Published private(set) var deviceVideos: [IPodLibrary.Video] = []
+    /// Media files on the selected device that no DB track references.
+    @Published private(set) var orphans: [IPodLibrary.Orphan] = []
     /// Last failed device read/write outside the queue (list load, remove,
     /// rename, eject); the queue reports its failures on the item instead.
     @Published var deviceError: String?
@@ -135,12 +137,18 @@ final class SyncModel: ObservableObject {
         guard let device = selectedDevice, device.isSupported,
               device.databaseExists else {
             deviceVideos = []
+            orphans = []
             return
         }
+        let library = IPodLibrary(volumeURL: device.volumeURL)
         do {
-            deviceVideos = try IPodLibrary(volumeURL: device.volumeURL).videos()
+            deviceVideos = try library.videos()
+            // Advisory, so a scan failure must not take the video list
+            // down with it — no orphans shown beats no library shown.
+            orphans = (try? library.orphanedFiles()) ?? []
         } catch {
             deviceVideos = []
+            orphans = []
             deviceError = "Could not read iTunesDB: \(error)"
         }
     }
@@ -318,6 +326,24 @@ final class SyncModel: ObservableObject {
             var prefs = DevicePrefs.load(volumeURL: volume)
             prefs.videoProfile = profile
             try prefs.save(volumeURL: volume)
+        }
+    }
+
+    /// Deletes the currently listed orphans (plus their `._*` AppleDouble
+    /// siblings). The list can only shrink between scan and click — track
+    /// references never grow to cover an existing file (`add` always
+    /// creates a fresh one) — so deleting the captured snapshot is safe.
+    func cleanUpOrphans() {
+        let doomed = orphans
+        guard !doomed.isEmpty else { return }
+        performDeviceWrite { _ in
+            let fm = FileManager.default
+            for orphan in doomed {
+                try fm.removeItem(at: orphan.url)
+                let sidecar = orphan.url.deletingLastPathComponent()
+                    .appendingPathComponent("._" + orphan.name)
+                try? fm.removeItem(at: sidecar)
+            }
         }
     }
 
