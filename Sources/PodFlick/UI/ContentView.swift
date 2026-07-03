@@ -183,6 +183,7 @@ struct ContentView: View {
 
 private struct DeviceHeaderView: View {
     @ObservedObject var model: SyncModel
+    @State private var showingDeviceInfo = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -191,7 +192,25 @@ private struct DeviceHeaderView: View {
                 .foregroundStyle(model.selectedDevice == nil ? .secondary : .primary)
             if let device = model.selectedDevice {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(device.name).font(.headline)
+                    HStack(spacing: 6) {
+                        Text(device.name).font(.headline)
+                        if device.hasRockbox {
+                            RockboxBadge(version: device.rockboxVersion)
+                        }
+                        if !Self.infoRows(for: device).isEmpty {
+                            Button {
+                                showingDeviceInfo.toggle()
+                            } label: {
+                                Image(systemName: "info.circle")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .help("Device details")
+                            .popover(isPresented: $showingDeviceInfo) {
+                                DeviceInfoPopover(rows: Self.infoRows(for: device))
+                            }
+                        }
+                    }
                     Text(subtitle(for: device))
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -259,8 +278,59 @@ private struct DeviceHeaderView: View {
     private func subtitle(for device: IPodDevice) -> String {
         var parts: [String] = []
         if let model = device.modelNumber { parts.append("Model \(model)") }
-        parts.append("\(Formatters.bytes(device.freeBytes)) free")
+        if let total = device.totalBytes {
+            parts.append("\(Formatters.bytes(device.freeBytes)) free of "
+                + Formatters.bytes(total))
+        } else {
+            parts.append("\(Formatters.bytes(device.freeBytes)) free")
+        }
         return parts.joined(separator: " · ")
+    }
+
+    /// Label/value pairs for the ⓘ popover; absent fields yield no row
+    /// (DMRD's empty SysInfo shows only the volume format).
+    static func infoRows(for device: IPodDevice) -> [(label: String, value: String)] {
+        var rows: [(label: String, value: String)] = []
+        if let firmware = device.firmwareVersion { rows.append(("Firmware", firmware)) }
+        if let serial = device.serialNumber { rows.append(("Serial", serial)) }
+        if device.hasRockbox {
+            rows.append(("Rockbox", device.rockboxVersion ?? "installed"))
+        }
+        if let format = device.volumeFormat { rows.append(("Format", format)) }
+        return rows
+    }
+}
+
+/// Small capsule next to the device name; the version (when the build
+/// stamps one) rides in the tooltip and the ⓘ popover.
+private struct RockboxBadge: View {
+    let version: String?
+
+    var body: some View {
+        Text("Rockbox")
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .foregroundStyle(.orange)
+            .background(Capsule().fill(.orange.opacity(0.15)))
+            .help(version.map { "Rockbox \($0)" } ?? "Rockbox installed")
+    }
+}
+
+private struct DeviceInfoPopover: View {
+    let rows: [(label: String, value: String)]
+
+    var body: some View {
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
+            ForEach(rows, id: \.label) { row in
+                GridRow {
+                    Text(row.label).foregroundStyle(.secondary)
+                    Text(row.value).textSelection(.enabled)
+                }
+            }
+        }
+        .font(.callout)
+        .padding(12)
     }
 }
 

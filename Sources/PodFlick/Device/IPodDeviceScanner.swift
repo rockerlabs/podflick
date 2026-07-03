@@ -31,30 +31,81 @@ struct IPodDeviceScanner {
             atPath: deviceDir.appendingPathComponent("SysInfoExtended").path)
         let databaseExists = fileManager.fileExists(
             atPath: IPodDevice.databaseURL(onVolume: volume).path)
+        let sysInfo = sysInfoFields(at: deviceDir.appendingPathComponent("SysInfo"))
+        let rockbox = rockbox(onVolume: volume)
+        let resources = try? volume.resourceValues(forKeys:
+            [.volumeLocalizedFormatDescriptionKey, .volumeTotalCapacityKey])
 
         return IPodDevice(
             volumeURL: volume,
             name: volume.lastPathComponent,
-            modelNumber: modelNumber(sysInfo: deviceDir.appendingPathComponent("SysInfo")),
+            modelNumber: modelNumber(sysInfo: sysInfo),
             rejection: hashRequired ? .hashRequiredModel : nil,
             databaseExists: databaseExists,
             freeBytes: freeBytes(of: volume),
-            videoProfile: DevicePrefs.load(volumeURL: volume).videoProfile)
+            videoProfile: DevicePrefs.load(volumeURL: volume).videoProfile,
+            firmwareVersion: firmwareVersion(sysInfo: sysInfo),
+            serialNumber: sysInfo["pszSerialNumber"],
+            hasRockbox: rockbox.present,
+            rockboxVersion: rockbox.version,
+            volumeFormat: resources?.volumeLocalizedFormatDescription,
+            totalBytes: (resources?.volumeTotalCapacity).map(Int64.init))
     }
 
-    /// `ModelNumStr` from `iPod_Control/Device/SysInfo` — "ModelNumStr: xA146"
-    /// → "A146". Display-only and absent on some devices; the support guard
-    /// is the SysInfoExtended check above, not this string.
-    private func modelNumber(sysInfo: URL) -> String? {
-        guard let text = try? String(contentsOf: sysInfo, encoding: .utf8) else { return nil }
+    /// One-pass parse of `iPod_Control/Device/SysInfo` ("Key: value" lines)
+    /// into a field map. Everything read from it is display-only and absent
+    /// on some devices (DMRD ships an empty SysInfo); the support guard is
+    /// the SysInfoExtended check above, not this file.
+    private func sysInfoFields(at url: URL) -> [String: String] {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [:] }
+        var fields: [String: String] = [:]
         for line in text.split(whereSeparator: \.isNewline) {
             let parts = line.split(separator: ":", maxSplits: 1)
-            guard parts.count == 2, parts[0] == "ModelNumStr" else { continue }
+            guard parts.count == 2 else { continue }
             let value = parts[1].trimmingCharacters(in: .whitespaces)
-            guard !value.isEmpty else { return nil }
-            return value.hasPrefix("x") ? String(value.dropFirst()) : value
+            guard !value.isEmpty else { continue }
+            fields[parts[0].trimmingCharacters(in: .whitespaces)] = value
         }
-        return nil
+        return fields
+    }
+
+    /// "ModelNumStr: xA146" → "A146".
+    private func modelNumber(sysInfo: [String: String]) -> String? {
+        guard let value = sysInfo["ModelNumStr"] else { return nil }
+        return value.hasPrefix("x") ? String(value.dropFirst()) : value
+    }
+
+    /// "visibleBuildID: 0x04C08000 (1.2.1)" → "1.2.1". Only the parenthesized
+    /// human-readable version is worth showing; a bare hex build ID is not.
+    private func firmwareVersion(sysInfo: [String: String]) -> String? {
+        guard let value = sysInfo["visibleBuildID"],
+              let open = value.lastIndex(of: "("),
+              let close = value.lastIndex(of: ")"), open < close else { return nil }
+        let version = value[value.index(after: open)..<close]
+            .trimmingCharacters(in: .whitespaces)
+        return version.isEmpty ? nil : version
+    }
+
+    /// Rockbox lives in `/.rockbox/`; its build stamps a "Version:" line
+    /// into `rockbox-info.txt`. Directory without the file (or without the
+    /// line) still counts as installed — version is a bonus.
+    private func rockbox(onVolume volume: URL) -> (present: Bool, version: String?) {
+        let dir = volume.appendingPathComponent(".rockbox", isDirectory: true)
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: dir.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else { return (false, nil) }
+        guard let text = try? String(
+            contentsOf: dir.appendingPathComponent("rockbox-info.txt"),
+            encoding: .utf8) else { return (true, nil) }
+        for line in text.split(whereSeparator: \.isNewline) {
+            let parts = line.split(separator: ":", maxSplits: 1)
+            guard parts.count == 2,
+                  parts[0].trimmingCharacters(in: .whitespaces) == "Version"
+            else { continue }
+            let version = parts[1].trimmingCharacters(in: .whitespaces)
+            return (true, version.isEmpty ? nil : version)
+        }
+        return (true, nil)
     }
 
     private func freeBytes(of volume: URL) -> Int64 {
