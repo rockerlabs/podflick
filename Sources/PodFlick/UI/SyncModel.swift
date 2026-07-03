@@ -253,10 +253,12 @@ final class SyncModel: ObservableObject {
                 }
             }
             set(.done)
-            refreshDevices()
         } catch {
             set(.failed(Self.message(for: error)))
         }
+        // On success AND failure: free space moved either way, and a
+        // failed copy can leave a fresh orphan the banner should show.
+        refreshDevices()
     }
 
     private func setStage(_ stage: Stage, for id: UUID) {
@@ -329,20 +331,20 @@ final class SyncModel: ObservableObject {
         }
     }
 
-    /// Deletes the currently listed orphans (plus their `._*` AppleDouble
-    /// siblings). The list can only shrink between scan and click — track
-    /// references never grow to cover an existing file (`add` always
-    /// creates a fresh one) — so deleting the captured snapshot is safe.
+    /// Deletes the currently listed orphans — but only those that are
+    /// STILL orphans by the time the write queue gets to us. The banner's
+    /// list can go stale: a scan during an in-flight upload sees the
+    /// half-copied file as unreferenced, and this deletion serializes
+    /// BEHIND that upload's DB splice. Re-verifying inside the same
+    /// queued transaction closes the race for good.
     func cleanUpOrphans() {
         let doomed = orphans
         guard !doomed.isEmpty else { return }
-        performDeviceWrite { _ in
-            let fm = FileManager.default
-            for orphan in doomed {
-                try fm.removeItem(at: orphan.url)
-                let sidecar = orphan.url.deletingLastPathComponent()
-                    .appendingPathComponent("._" + orphan.name)
-                try? fm.removeItem(at: sidecar)
+        performDeviceWrite { volume in
+            let library = IPodLibrary(volumeURL: volume)
+            let stillOrphaned = Set(try library.orphanedFiles().map(\.url))
+            for orphan in doomed where stillOrphaned.contains(orphan.url) {
+                try library.delete(orphan)
             }
         }
     }
