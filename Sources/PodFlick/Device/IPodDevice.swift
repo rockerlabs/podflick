@@ -24,6 +24,16 @@ struct IPodDevice {
     let freeBytes: Int64
     let videoProfile: VideoProfile  // from DevicePrefs; .standard unless opted in
 
+    // Display-only cosmetics (B.12), all read from the volume — no USB
+    // protocol. Each is optional: some devices ship an empty SysInfo, and
+    // the UI hides whatever is absent.
+    let firmwareVersion: String?    // SysInfo visibleBuildID "0x… (N.M)" → "N.M"
+    let serialNumber: String?       // SysInfo pszSerialNumber
+    let hasRockbox: Bool            // /.rockbox/ directory present
+    let rockboxVersion: String?     // /.rockbox/rockbox-info.txt "Version:" line
+    let volumeFormat: String?       // e.g. "MS-DOS (FAT32)", from URL resource values
+    let totalBytes: Int64?          // volume capacity, shown next to free space
+
     var isSupported: Bool { rejection == nil }
 
     var databaseURL: URL { Self.databaseURL(onVolume: volumeURL) }
