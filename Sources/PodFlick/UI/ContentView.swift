@@ -59,9 +59,8 @@ struct ContentView: View {
 
     /// First few orphan names for the confirmation dialog.
     private var orphanFileList: String {
-        let names = model.orphans.map(\.name)
-        let shown = names.prefix(5).joined(separator: ", ")
-        let more = names.count - 5
+        let shown = model.orphans.prefix(5).map(\.name).joined(separator: ", ")
+        let more = model.orphans.count - 5
         return more > 0 ? "\(shown) and \(more) more" : shown
     }
 

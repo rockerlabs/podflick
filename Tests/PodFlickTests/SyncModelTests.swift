@@ -231,6 +231,29 @@ final class SyncModelTests: XCTestCase {
         XCTAssertEqual(model.deviceVideos.count, 4, "the library is untouched")
     }
 
+    /// The banner's list can go stale between scan and click; entries
+    /// that are no longer orphans by delete time (here: file already
+    /// gone) must be skipped silently, not surfaced as errors.
+    func testCleanUpSkipsEntriesThatAreNoLongerOrphans() async throws {
+        let volume = try makeVolume("IPOD")
+        let musicDir = volume.appendingPathComponent("iPod_Control/Music/F35")
+        try FileManager.default.createDirectory(
+            at: musicDir, withIntermediateDirectories: true)
+        let orphan = musicDir.appendingPathComponent("XEPQ.m4v")
+        try Data("x".utf8).write(to: orphan)
+
+        let model = makeModel()
+        XCTAssertEqual(model.orphans.count, 1)
+
+        try FileManager.default.removeItem(at: orphan)
+        model.cleanUpOrphans()
+        await model.waitUntilDeviceWriteFinished()
+
+        XCTAssertNil(model.deviceError,
+                     "a stale entry is a no-op, not a failure")
+        XCTAssertTrue(model.orphans.isEmpty)
+    }
+
     // MARK: - Error rendering
 
     func testErrorMessagesAreHumanReadable() {
