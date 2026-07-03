@@ -38,7 +38,8 @@ struct IPodDeviceScanner {
             modelNumber: modelNumber(sysInfo: deviceDir.appendingPathComponent("SysInfo")),
             rejection: hashRequired ? .hashRequiredModel : nil,
             databaseExists: databaseExists,
-            freeBytes: freeBytes(of: volume))
+            freeBytes: freeBytes(of: volume),
+            videoProfile: DevicePrefs.load(volumeURL: volume).videoProfile)
     }
 
     /// `ModelNumStr` from `iPod_Control/Device/SysInfo` — "ModelNumStr: xA146"

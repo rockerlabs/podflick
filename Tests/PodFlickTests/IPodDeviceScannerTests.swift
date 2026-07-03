@@ -24,7 +24,8 @@ final class IPodDeviceScannerTests: XCTestCase {
                             iPodControl: Bool = true,
                             sysInfo: String? = "ModelNumStr: xA146\n",
                             sysInfoExtended: Bool = false,
-                            database: Bool = true) throws -> URL {
+                            database: Bool = true,
+                            prefsJSON: String? = nil) throws -> URL {
         let volume = volumesRoot.appendingPathComponent(name)
         let fm = FileManager.default
         try fm.createDirectory(at: volume, withIntermediateDirectories: true)
@@ -41,10 +42,14 @@ final class IPodDeviceScannerTests: XCTestCase {
             try Data("<plist/>".utf8).write(
                 to: deviceDir.appendingPathComponent("SysInfoExtended"))
         }
+        let iTunes = control.appendingPathComponent("iTunes")
+        try fm.createDirectory(at: iTunes, withIntermediateDirectories: true)
         if database {
-            let iTunes = control.appendingPathComponent("iTunes")
-            try fm.createDirectory(at: iTunes, withIntermediateDirectories: true)
             try Data("mhbd".utf8).write(to: iTunes.appendingPathComponent("iTunesDB"))
+        }
+        if let prefsJSON {
+            try prefsJSON.write(to: DevicePrefs.url(onVolume: volume),
+                                atomically: true, encoding: .utf8)
         }
         return volume
     }
@@ -123,6 +128,42 @@ final class IPodDeviceScannerTests: XCTestCase {
         let device = try XCTUnwrap(scanner.scan().first)
         XCTAssertNil(device.modelNumber)
         XCTAssertTrue(device.isSupported)
+    }
+
+    // MARK: - Video profile (DevicePrefs sidecar)
+
+    func testNoPrefsFileDefaultsToStandardProfile() throws {
+        try makeVolume("IPOD")
+
+        XCTAssertEqual(scanner.scan().first?.videoProfile, .standard)
+    }
+
+    func testPrefsFileOptsDeviceIntoHighProfile() throws {
+        try makeVolume("IPOD", prefsJSON: #"{"videoProfile":"high"}"#)
+
+        XCTAssertEqual(scanner.scan().first?.videoProfile, .high)
+    }
+
+    /// A 5G must never end up on the black-screen recipe because of a
+    /// damaged or newer-app prefs file — anything unreadable is .standard.
+    func testCorruptOrUnknownPrefsFallBackToStandardProfile() throws {
+        try makeVolume("CORRUPT", prefsJSON: "not json at all")
+        try makeVolume("UNKNOWN", prefsJSON: #"{"videoProfile":"ultra8k"}"#)
+
+        let profiles = scanner.scan().map(\.videoProfile)
+        XCTAssertEqual(profiles, [.standard, .standard])
+    }
+
+    func testPrefsRoundTripThroughSaveAndRescan() throws {
+        let volume = try makeVolume("IPOD")
+        var prefs = DevicePrefs.load(volumeURL: volume)
+        XCTAssertEqual(prefs, DevicePrefs())
+
+        prefs.videoProfile = .high
+        try prefs.save(volumeURL: volume)
+
+        XCTAssertEqual(DevicePrefs.load(volumeURL: volume).videoProfile, .high)
+        XCTAssertEqual(scanner.scan().first?.videoProfile, .high)
     }
 
     // MARK: - Database presence

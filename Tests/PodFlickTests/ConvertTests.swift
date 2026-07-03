@@ -45,6 +45,43 @@ final class ConvertTests: XCTestCase {
         ])
     }
 
+    /// Pins the opt-in 5.5G recipe (640×480 baseline L3.0 ≤1.5 Mbps —
+    /// reference/convert_to_ipod.sh). Everything but the four decoder
+    /// knobs must stay identical to the standard profile. Same rule as
+    /// above: a drift is firmware-facing and needs a real-device re-proof.
+    func testHighProfileArgumentsMatch55GRecipe() {
+        let standard = IPodVideoConverter.conversionArguments(
+            input: URL(fileURLWithPath: "/in/movie.mkv"),
+            output: URL(fileURLWithPath: "/out/movie.m4v"),
+            title: "Movie", profile: .standard)
+        let high = IPodVideoConverter.conversionArguments(
+            input: URL(fileURLWithPath: "/in/movie.mkv"),
+            output: URL(fileURLWithPath: "/out/movie.m4v"),
+            title: "Movie", profile: .high)
+
+        var expected = standard
+        expected[expected.firstIndex(of: "1.3")!] = "3.0"
+        expected[expected.firstIndex(where: { $0.hasPrefix("scale=320:240") })!]
+            = "scale=640:480:force_original_aspect_ratio=decrease,"
+            + "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+        expected[expected.firstIndex(of: "700k")!] = "1200k"
+        expected[expected.firstIndex(of: "768k")!] = "1500k"
+        expected[expected.firstIndex(of: "1536k")!] = "3000k"
+        XCTAssertEqual(high, expected)
+    }
+
+    /// The default profile is the safe one — omitting the argument can
+    /// never produce a file a 5G won't play.
+    func testConversionArgumentsDefaultToStandardProfile() {
+        let input = URL(fileURLWithPath: "/in/movie.mkv")
+        let output = URL(fileURLWithPath: "/out/movie.m4v")
+        XCTAssertEqual(
+            IPodVideoConverter.conversionArguments(input: input, output: output,
+                                                   title: "Movie"),
+            IPodVideoConverter.conversionArguments(input: input, output: output,
+                                                   title: "Movie", profile: .standard))
+    }
+
     // MARK: - Progress parsing
 
     func testProgressParserReadsMicroseconds() {

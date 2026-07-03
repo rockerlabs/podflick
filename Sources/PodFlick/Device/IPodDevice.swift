@@ -22,6 +22,7 @@ struct IPodDevice {
     let rejection: Rejection?
     let databaseExists: Bool    // iPod_Control/iTunes/iTunesDB present at scan time
     let freeBytes: Int64
+    let videoProfile: VideoProfile  // from DevicePrefs; .standard unless opted in
 
     var isSupported: Bool { rejection == nil }
 
