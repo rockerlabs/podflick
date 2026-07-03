@@ -177,12 +177,28 @@ private struct DeviceHeaderView: View {
                 .labelsHidden()
                 .frame(maxWidth: 180)
             }
+            if model.selectedDevice != nil {
+                if model.isEjecting {
+                    ProgressView()
+                        .controlSize(.small)
+                        .help("Ejecting…")
+                } else {
+                    Button {
+                        model.eject()
+                    } label: {
+                        Image(systemName: "eject.fill")
+                    }
+                    .help("Sync and safely eject")
+                    .disabled(model.queueIsBusy)
+                }
+            }
             Button {
                 model.refreshDevices()
             } label: {
                 Image(systemName: "arrow.clockwise")
             }
             .help("Rescan for iPods")
+            .disabled(model.isEjecting)
         }
         .padding(12)
     }
