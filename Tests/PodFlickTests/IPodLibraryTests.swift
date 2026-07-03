@@ -56,6 +56,59 @@ final class IPodLibraryTests: XCTestCase {
         XCTAssertGreaterThan(known.fileSize, 0)
     }
 
+    // MARK: - orphans
+
+    /// Writes an empty file at `iPod_Control/Music/<folder>/<name>`.
+    @discardableResult
+    private func makeMediaFile(_ folder: String, _ name: String,
+                               bytes: Int = 0) throws -> URL {
+        let dir = volume.appendingPathComponent("iPod_Control/Music/\(folder)")
+        try FileManager.default.createDirectory(
+            at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent(name)
+        try Data(repeating: 0xEE, count: bytes).write(to: url)
+        return url
+    }
+
+    func testOrphanedFilesFindsOnlyUnreferencedMedia() throws {
+        // Materialize every DB-referenced file, in the on-disk case the
+        // DB uses — none of these may show up as orphans.
+        for video in try library.videos() {
+            let file = library.url(forIPodPath: video.ipodPath)
+            try FileManager.default.createDirectory(
+                at: file.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            try Data("v".utf8).write(to: file)
+        }
+        let orphan = try makeMediaFile("F35", "XEPQ.m4v", bytes: 1234)
+        try makeMediaFile("F35", "._XEPQ.m4v")     // AppleDouble junk
+        try makeMediaFile("F00", ".hidden")        // dot-file junk
+
+        let orphans = try library.orphanedFiles()
+        // Orphan URLs come back canonicalized (/var → /private/var).
+        XCTAssertEqual(orphans.map { $0.url.path },
+                       [try XCTUnwrap(orphan.resourceValues(
+                           forKeys: [.canonicalPathKey]).canonicalPath)])
+        XCTAssertEqual(orphans.first?.fileSize, 1234)
+    }
+
+    /// FAT32 is case-insensitive: a referenced file whose on-disk case
+    /// differs from the DB path must NOT be reported as an orphan.
+    func testOrphanedFilesComparesPathsCaseInsensitively() throws {
+        let referenced = try XCTUnwrap(try library.videos().first).ipodPath
+        let lowercased = library.url(forIPodPath: referenced.lowercased())
+        try FileManager.default.createDirectory(
+            at: lowercased.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
+        try Data("v".utf8).write(to: lowercased)
+
+        XCTAssertEqual(try library.orphanedFiles(), [])
+    }
+
+    func testOrphanedFilesEmptyWhenMusicDirMissing() throws {
+        XCTAssertEqual(try library.orphanedFiles(), [])
+    }
+
     // MARK: - add
 
     func testAddCopiesFileAndWritesWriterIdenticalDB() throws {
