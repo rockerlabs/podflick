@@ -202,6 +202,58 @@ final class SyncModelTests: XCTestCase {
         XCTAssertEqual(DevicePrefs.load(volumeURL: volume).videoProfile, .standard)
     }
 
+    // MARK: - Orphans
+
+    func testOrphansPublishedOnReloadAndCleanedUpOnDemand() async throws {
+        let volume = try makeVolume("IPOD")
+        let musicDir = volume.appendingPathComponent("iPod_Control/Music/F35")
+        try FileManager.default.createDirectory(
+            at: musicDir, withIntermediateDirectories: true)
+        let orphan = musicDir.appendingPathComponent("XEPQ.m4v")
+        try Data(repeating: 0xEE, count: 500).write(to: orphan)
+        let sidecar = musicDir.appendingPathComponent("._XEPQ.m4v")
+        try Data("junk".utf8).write(to: sidecar)
+
+        let model = makeModel()
+        XCTAssertEqual(model.orphans.map { $0.url.path },
+                       [try XCTUnwrap(orphan.resourceValues(
+                           forKeys: [.canonicalPathKey]).canonicalPath)])
+        XCTAssertEqual(model.deviceVideos.count, 4, "orphans don't hide videos")
+
+        model.cleanUpOrphans()
+        await model.waitUntilDeviceWriteFinished()
+
+        XCTAssertTrue(model.orphans.isEmpty)
+        XCTAssertNil(model.deviceError)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: orphan.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path),
+                       "the AppleDouble sidecar goes with its file")
+        XCTAssertEqual(model.deviceVideos.count, 4, "the library is untouched")
+    }
+
+    /// The banner's list can go stale between scan and click; entries
+    /// that are no longer orphans by delete time (here: file already
+    /// gone) must be skipped silently, not surfaced as errors.
+    func testCleanUpSkipsEntriesThatAreNoLongerOrphans() async throws {
+        let volume = try makeVolume("IPOD")
+        let musicDir = volume.appendingPathComponent("iPod_Control/Music/F35")
+        try FileManager.default.createDirectory(
+            at: musicDir, withIntermediateDirectories: true)
+        let orphan = musicDir.appendingPathComponent("XEPQ.m4v")
+        try Data("x".utf8).write(to: orphan)
+
+        let model = makeModel()
+        XCTAssertEqual(model.orphans.count, 1)
+
+        try FileManager.default.removeItem(at: orphan)
+        model.cleanUpOrphans()
+        await model.waitUntilDeviceWriteFinished()
+
+        XCTAssertNil(model.deviceError,
+                     "a stale entry is a no-op, not a failure")
+        XCTAssertTrue(model.orphans.isEmpty)
+    }
+
     // MARK: - Error rendering
 
     func testErrorMessagesAreHumanReadable() {

@@ -65,6 +65,8 @@ final class SyncModel: ObservableObject {
     }
     @Published private(set) var queue: [QueueItem] = []
     @Published private(set) var deviceVideos: [IPodLibrary.Video] = []
+    /// Media files on the selected device that no DB track references.
+    @Published private(set) var orphans: [IPodLibrary.Orphan] = []
     /// Last failed device read/write outside the queue (list load, remove,
     /// rename, eject); the queue reports its failures on the item instead.
     @Published var deviceError: String?
@@ -135,12 +137,18 @@ final class SyncModel: ObservableObject {
         guard let device = selectedDevice, device.isSupported,
               device.databaseExists else {
             deviceVideos = []
+            orphans = []
             return
         }
+        let library = IPodLibrary(volumeURL: device.volumeURL)
         do {
-            deviceVideos = try IPodLibrary(volumeURL: device.volumeURL).videos()
+            deviceVideos = try library.videos()
+            // Advisory, so a scan failure must not take the video list
+            // down with it — no orphans shown beats no library shown.
+            orphans = (try? library.orphanedFiles()) ?? []
         } catch {
             deviceVideos = []
+            orphans = []
             deviceError = "Could not read iTunesDB: \(error)"
         }
     }
@@ -245,10 +253,12 @@ final class SyncModel: ObservableObject {
                 }
             }
             set(.done)
-            refreshDevices()
         } catch {
             set(.failed(Self.message(for: error)))
         }
+        // On success AND failure: free space moved either way, and a
+        // failed copy can leave a fresh orphan the banner should show.
+        refreshDevices()
     }
 
     private func setStage(_ stage: Stage, for id: UUID) {
@@ -318,6 +328,24 @@ final class SyncModel: ObservableObject {
             var prefs = DevicePrefs.load(volumeURL: volume)
             prefs.videoProfile = profile
             try prefs.save(volumeURL: volume)
+        }
+    }
+
+    /// Deletes the currently listed orphans — but only those that are
+    /// STILL orphans by the time the write queue gets to us. The banner's
+    /// list can go stale: a scan during an in-flight upload sees the
+    /// half-copied file as unreferenced, and this deletion serializes
+    /// BEHIND that upload's DB splice. Re-verifying inside the same
+    /// queued transaction closes the race for good.
+    func cleanUpOrphans() {
+        let doomed = orphans
+        guard !doomed.isEmpty else { return }
+        performDeviceWrite { volume in
+            let library = IPodLibrary(volumeURL: volume)
+            let stillOrphaned = Set(try library.orphanedFiles().map(\.url))
+            for orphan in doomed where stillOrphaned.contains(orphan.url) {
+                try library.delete(orphan)
+            }
         }
     }
 

@@ -138,8 +138,78 @@ struct IPodLibrary {
 
     /// ":iPod_Control:Music:F16:JHBI.m4v" → file URL on this volume.
     func url(forIPodPath path: String) -> URL {
-        volumeURL.appendingPathComponent(
-            path.split(separator: ":").joined(separator: "/"))
+        volumeURL.appendingPathComponent(Self.relativePath(forIPodPath: path))
+    }
+
+    /// ":iPod_Control:Music:F16:JHBI.m4v" → "iPod_Control/Music/F16/JHBI.m4v".
+    private static func relativePath(forIPodPath path: String) -> String {
+        path.split(separator: ":").joined(separator: "/")
+    }
+
+    // MARK: - Orphans
+
+    /// A file under `iPod_Control/Music` that no DB track references —
+    /// invisible to the firmware, pure dead weight (found in the wild:
+    /// an 800 MB leftover from a pre-PodFlick experiment).
+    struct Orphan: Identifiable, Equatable, Sendable {
+        let url: URL
+        let fileSize: Int64
+        var id: URL { url }
+        var name: String { url.lastPathComponent }
+    }
+
+    /// Files under `Music/` unreferenced by ANY track — not just videos:
+    /// a music track's file must never look orphaned. Path comparison is
+    /// case-insensitive (FAT32); dot-prefixed entries are skipped (macOS
+    /// recreates its `._*` AppleDouble metadata at will).
+    func orphanedFiles() throws -> [Orphan] {
+        // One canonical base for both sides: the enumerator hands back
+        // symlink-resolved URLs (/var → /private/var) and a raw
+        // volumeURL-based path would never string-match them. NOT
+        // `resolvingSymlinksInPath()` — that one STRIPS the /private
+        // prefix instead of adding it. No canonical path → no scan:
+        // guessing a base here could flag the ENTIRE library as orphaned.
+        guard let canonicalVolume = try? volumeURL.resourceValues(
+            forKeys: [.canonicalPathKey]).canonicalPath else { return [] }
+        let volume = URL(fileURLWithPath: canonicalVolume, isDirectory: true)
+        let referenced = Set(
+            try ITunesDB.parse(Data(contentsOf: databaseURL)).tracks
+                .map { Self.comparablePath(volume.appendingPathComponent(
+                    Self.relativePath(forIPodPath: $0.path)).path) })
+        let musicDir = volume.appendingPathComponent("iPod_Control/Music",
+                                                     isDirectory: true)
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey]
+        guard let files = FileManager.default.enumerator(
+            at: musicDir, includingPropertiesForKeys: Array(keys)) else { return [] }
+
+        var orphans: [Orphan] = []
+        for case let file as URL in files {
+            guard !file.lastPathComponent.hasPrefix("."),
+                  let values = try? file.resourceValues(forKeys: keys),
+                  values.isRegularFile == true,
+                  !referenced.contains(Self.comparablePath(file.path)) else { continue }
+            orphans.append(Orphan(url: file, fileSize: Int64(values.fileSize ?? 0)))
+        }
+        return orphans.sorted { $0.url.path < $1.url.path }
+    }
+
+    /// Comparison form for "is this on-disk file the one the DB names":
+    /// case-folded (FAT32 is case-insensitive) and Unicode-precomposed —
+    /// HFS+ stores names decomposed (NFD) while DB strings may be NFC,
+    /// and for a feature that DELETES on mismatch, a normalization miss
+    /// must never manufacture an orphan.
+    private static func comparablePath(_ path: String) -> String {
+        path.precomposedStringWithCanonicalMapping.lowercased()
+    }
+
+    /// Deletes an orphan and its `._*` AppleDouble sidecar — the scan
+    /// skips those, so deletion owns them, keeping all AppleDouble
+    /// knowledge in this one place.
+    func delete(_ orphan: Orphan) throws {
+        let fm = FileManager.default
+        try fm.removeItem(at: orphan.url)
+        try? fm.removeItem(at: orphan.url.deletingLastPathComponent()
+            .appendingPathComponent("._" + orphan.name))
     }
 
     // MARK: - Media file placement
