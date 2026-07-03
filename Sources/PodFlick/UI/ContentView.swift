@@ -191,13 +191,14 @@ private struct DeviceHeaderView: View {
                 .font(.system(size: 28))
                 .foregroundStyle(model.selectedDevice == nil ? .secondary : .primary)
             if let device = model.selectedDevice {
+                let rows = infoRows(for: device)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(device.name).font(.headline)
                         if device.hasRockbox {
                             RockboxBadge(version: device.rockboxVersion)
                         }
-                        if !Self.infoRows(for: device).isEmpty {
+                        if !rows.isEmpty {
                             Button {
                                 showingDeviceInfo.toggle()
                             } label: {
@@ -207,7 +208,7 @@ private struct DeviceHeaderView: View {
                             .foregroundStyle(.secondary)
                             .help("Device details")
                             .popover(isPresented: $showingDeviceInfo) {
-                                DeviceInfoPopover(rows: Self.infoRows(for: device))
+                                DeviceInfoPopover(rows: rows)
                             }
                         }
                     }
@@ -278,18 +279,14 @@ private struct DeviceHeaderView: View {
     private func subtitle(for device: IPodDevice) -> String {
         var parts: [String] = []
         if let model = device.modelNumber { parts.append("Model \(model)") }
-        if let total = device.totalBytes {
-            parts.append("\(Formatters.bytes(device.freeBytes)) free of "
-                + Formatters.bytes(total))
-        } else {
-            parts.append("\(Formatters.bytes(device.freeBytes)) free")
-        }
+        let free = "\(Formatters.bytes(device.freeBytes)) free"
+        parts.append(device.totalBytes.map { "\(free) of \(Formatters.bytes($0))" } ?? free)
         return parts.joined(separator: " · ")
     }
 
     /// Label/value pairs for the ⓘ popover; absent fields yield no row
     /// (DMRD's empty SysInfo shows only the volume format).
-    static func infoRows(for device: IPodDevice) -> [(label: String, value: String)] {
+    private func infoRows(for device: IPodDevice) -> [(label: String, value: String)] {
         var rows: [(label: String, value: String)] = []
         if let firmware = device.firmwareVersion { rows.append(("Firmware", firmware)) }
         if let serial = device.serialNumber { rows.append(("Serial", serial)) }
