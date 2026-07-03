@@ -19,19 +19,13 @@ final class IPodLibraryTests: XCTestCase {
     override func setUpWithError() throws {
         workDir = try makeTempDirectory(prefix: "PodFlickLibrary")
         volume = workDir.appendingPathComponent("IPOD")
-        try install(fixtureDB: try fixture("iTunesDB.four-videos"))
+        try install(database: try fixture("iTunesDB.four-videos"),
+                    onVolume: volume)
         library = IPodLibrary(volumeURL: volume)
     }
 
     override func tearDownWithError() throws {
         try FileManager.default.removeItem(at: workDir)
-    }
-
-    private func install(fixtureDB: Data) throws {
-        let iTunesDir = volume.appendingPathComponent("iPod_Control/iTunes")
-        try FileManager.default.createDirectory(
-            at: iTunesDir, withIntermediateDirectories: true)
-        try fixtureDB.write(to: iTunesDir.appendingPathComponent("iTunesDB"))
     }
 
     private func makeSourceFile(bytes: Int = 100_000) throws -> URL {
@@ -145,7 +139,7 @@ final class IPodLibraryTests: XCTestCase {
         var writer = try ITunesDBWriter(try fixture("iTunesDB.single-video"))
         let onlyTrack = try XCTUnwrap(writer.db.tracks.first)
         try writer.remove(trackID: onlyTrack.id)
-        try install(fixtureDB: writer.data)
+        try install(database: writer.data, onVolume: volume)
 
         let source = try makeSourceFile()
         XCTAssertThrowsError(try library.add(
@@ -198,6 +192,19 @@ final class IPodLibraryTests: XCTestCase {
         XCTAssertEqual(renamed.title, "Election Day")
         XCTAssertEqual(renamed.ipodPath, target.ipodPath)
         XCTAssertEqual(backups.count, 1)
+    }
+
+    func testRenameToAnotherTracksTitleThrows() throws {
+        let videos = try library.videos()
+        let taken = videos[0].title
+
+        XCTAssertThrowsError(
+            try library.rename(trackID: videos[1].id, to: taken)) { error in
+            XCTAssertEqual(error as? IPodLibrary.LibraryError,
+                           .duplicateTitle(taken))
+        }
+        // Re-asserting a track's own title is not a duplicate.
+        XCTAssertNoThrow(try library.rename(trackID: videos[0].id, to: taken))
     }
 
     func testMutatingUnknownTrackThrows() {

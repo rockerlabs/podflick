@@ -22,18 +22,16 @@ final class SyncModelTests: XCTestCase {
                             database: Bool = true) throws -> URL {
         let volume = volumesRoot.appendingPathComponent(name)
         let control = volume.appendingPathComponent("iPod_Control")
-        let fm = FileManager.default
-        try fm.createDirectory(at: control.appendingPathComponent("Device"),
-                               withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: control.appendingPathComponent("Device"),
+            withIntermediateDirectories: true)
         if sysInfoExtended {
             try Data("<plist/>".utf8).write(to: control
                 .appendingPathComponent("Device/SysInfoExtended"))
         }
         if database {
-            let iTunes = control.appendingPathComponent("iTunes")
-            try fm.createDirectory(at: iTunes, withIntermediateDirectories: true)
-            try fixture("iTunesDB.four-videos")
-                .write(to: iTunes.appendingPathComponent("iTunesDB"))
+            try install(database: try fixture("iTunesDB.four-videos"),
+                        onVolume: volume)
         }
         return volume
     }
