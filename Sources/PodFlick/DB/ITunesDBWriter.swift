@@ -229,14 +229,17 @@ struct ITunesDBWriter {
         return blob
     }
 
-    /// Title/path mhod in the live-DB layout (byte-identical to the
-    /// reference string_mhod / Finder's own output — the selftest proves
-    /// the layout): 0x18 header; payload encoding=1, byte length, flag=1,
-    /// pad; UTF-16LE text zero-padded to a 4-byte boundary.
+    /// Title/path mhod in Finder's own layout: 0x18 header; payload
+    /// encoding=1, byte length, flag=1, pad(u32); UTF-16LE text; total is
+    /// EXACT (0x18+16+len, never rounded up). Every Finder-written string
+    /// mhod in the golden fixtures is unaligned-exact (totals 86, 118), and
+    /// the 2026-07-04 device smoke proved the firmware rejects a padded one
+    /// (empty menus) — the reference's `(…+3)&~3` is a latent bug its
+    /// selftest never hits (all generated titles happened to be 4-aligned).
     private static func stringMhod(type: UInt32, _ text: String) -> Data {
         // Explicit-endian UTF-16 encoding emits no BOM and cannot fail.
         let payload = text.data(using: .utf16LittleEndian)!
-        var mhod = Data(count: (0x18 + 16 + payload.count + 3) & ~3)
+        var mhod = Data(count: 0x18 + 16 + payload.count)
         mhod.replaceSubrange(0..<4, with: Data("mhod".utf8))
         mhod.putU32(0x18, at: 4)
         mhod.putU32(UInt32(mhod.count), at: 8)

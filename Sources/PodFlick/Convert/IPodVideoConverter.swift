@@ -1,11 +1,12 @@
 import Foundation
 
-/// Transcodes arbitrary video into the iPod 5G/5.5G envelope: H.264 Baseline
-/// ≤640×480 ≤1.5 Mbps ≤30fps + AAC-LC stereo, in an .m4v container
+/// Transcodes arbitrary video into the iPod 5G envelope: H.264 Baseline
+/// ≤320×240 ≤768 kbps ≤L1.3 ≤30fps + AAC-LC stereo, in an .m4v container
 /// (docs/itunesdb-format.md, "Video file requirements").
 ///
-/// The encoder settings are the on-device-proven recipe from
-/// `reference/convert_to_ipod.sh` — keep the two in sync.
+/// This is deliberately the 5G limit, not the 5.5G one: it plays on both
+/// generations, while `reference/convert_to_ipod.sh`'s 640×480 L3.0 output
+/// gave a black screen on the real 5G (B.5.1 smoke, 2026-07-04).
 struct IPodVideoConverter {
 
     enum ConversionError: Error, Equatable {
@@ -85,16 +86,20 @@ struct IPodVideoConverter {
             // The firmware plays one video + one audio track; subtitle/data
             // streams would otherwise be muxed into the .m4v.
             "-sn", "-dn",
-            // Proven recipe — reference/convert_to_ipod.sh.
+            // iPod 5G H.264 hardware-decoder limits: ≤320×240, baseline
+            // ≤L1.3, ≤768 kbps. Every file proven playing on the device
+            // fits this; the reference recipe's 640×480 L3.0 (the 5.5G
+            // profile) decodes to a black screen on the 5G (B.5.1 smoke,
+            // 2026-07-04). A per-device 5.5G profile is a backlog item.
             "-c:v", "libx264",
             "-profile:v", "baseline",
-            "-level", "3.0",
+            "-level", "1.3",
             "-pix_fmt", "yuv420p",
-            "-vf", "scale=640:480:force_original_aspect_ratio=decrease,"
+            "-vf", "scale=320:240:force_original_aspect_ratio=decrease,"
                  + "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-            "-b:v", "1200k",
-            "-maxrate", "1500k",
-            "-bufsize", "3000k",
+            "-b:v", "700k",
+            "-maxrate", "768k",
+            "-bufsize", "1536k",
             "-r", "30",
             "-c:a", "aac",
             "-b:a", "128k",
