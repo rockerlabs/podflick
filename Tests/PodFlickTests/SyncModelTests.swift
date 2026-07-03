@@ -181,6 +181,27 @@ final class SyncModelTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(model.deviceError).contains("uploads in progress"))
     }
 
+    // MARK: - Video profile
+
+    func testSetVideoProfilePersistsOnDeviceAndRefreshesSnapshot() async throws {
+        let volume = try makeVolume("IPOD")
+        let model = makeModel()
+        XCTAssertEqual(model.selectedDevice?.videoProfile, .standard)
+
+        model.setVideoProfile(.high)
+        await model.waitUntilDeviceWriteFinished()
+
+        XCTAssertEqual(model.selectedDevice?.videoProfile, .high)
+        XCTAssertEqual(DevicePrefs.load(volumeURL: volume).videoProfile, .high,
+                       "the setting must live on the device, not in the app")
+        XCTAssertNil(model.deviceError)
+
+        // Back to safe — the sidecar is rewritten, not append-only.
+        model.setVideoProfile(.standard)
+        await model.waitUntilDeviceWriteFinished()
+        XCTAssertEqual(DevicePrefs.load(volumeURL: volume).videoProfile, .standard)
+    }
+
     // MARK: - Error rendering
 
     func testErrorMessagesAreHumanReadable() {
