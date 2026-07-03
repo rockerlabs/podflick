@@ -165,7 +165,9 @@ writer's `--selftest` must regenerate the single-track fixture byte-exactly.
 ≤48 kHz, in .m4v/.mp4/.mov. The firmware lists what the DB says but won't
 play out-of-spec files — a 640×480 L3.0 file on the real 5G decodes to a
 black screen with a running timer (B.5.1 smoke, 2026-07-04); every file
-proven playing on it is 320×240 L1.3. Legacy MPEG-4 SP alternative:
+proven playing on it is 320×240 L1.3. BOTH operator devices proved
+5G-class this way: the 640×480 L3.0 test clip decodes black on each
+(B.5.3 verdict, 2026-07-04) — neither is a 5.5G. Legacy MPEG-4 SP alternative:
 ≤2.5 Mbps. PodFlick encodes to the 5G limit so output plays on both;
 `reference/convert_to_ipod.sh`'s 640×480 recipe is the 5.5G-only variant.
 Beware pre-UTF-8 metadata: a Windows-1251 `©nam` tag gave Finder an empty

@@ -19,16 +19,29 @@ final class IPodDeviceScannerTests: XCTestCase {
     }
 
     /// Builds a fake mounted volume; nil `sysInfo` omits the file entirely.
+    /// `rockbox` creates `/.rockbox/`; non-nil `rockboxInfo` adds
+    /// `rockbox-info.txt` with that content.
     @discardableResult
     private func makeVolume(_ name: String,
                             iPodControl: Bool = true,
                             sysInfo: String? = "ModelNumStr: xA146\n",
                             sysInfoExtended: Bool = false,
                             database: Bool = true,
-                            prefsJSON: String? = nil) throws -> URL {
+                            prefsJSON: String? = nil,
+                            rockbox: Bool = false,
+                            rockboxInfo: String? = nil) throws -> URL {
         let volume = volumesRoot.appendingPathComponent(name)
         let fm = FileManager.default
         try fm.createDirectory(at: volume, withIntermediateDirectories: true)
+        if rockbox || rockboxInfo != nil {
+            let rockboxDir = volume.appendingPathComponent(".rockbox")
+            try fm.createDirectory(at: rockboxDir, withIntermediateDirectories: true)
+            if let rockboxInfo {
+                try rockboxInfo.write(
+                    to: rockboxDir.appendingPathComponent("rockbox-info.txt"),
+                    atomically: true, encoding: .utf8)
+            }
+        }
         guard iPodControl else { return volume }
 
         let control = volume.appendingPathComponent("iPod_Control")
@@ -128,6 +141,90 @@ final class IPodDeviceScannerTests: XCTestCase {
         let device = try XCTUnwrap(scanner.scan().first)
         XCTAssertNil(device.modelNumber)
         XCTAssertTrue(device.isSupported)
+    }
+
+    // MARK: - Device-info cosmetics (B.12)
+
+    func testFirmwareVersionAndSerialParsedFromSysInfo() throws {
+        try makeVolume("IPOD", sysInfo: """
+            BoardHwName: iPod Q23
+            pszSerialNumber: JQ6250BFV9K
+            ModelNumStr: xA146
+            buildID: 0x04C08000 (4.1)
+            visibleBuildID: 0x04C08000 (1.2.1)
+            """)
+
+        let device = try XCTUnwrap(scanner.scan().first)
+        XCTAssertEqual(device.firmwareVersion, "1.2.1")
+        XCTAssertEqual(device.serialNumber, "JQ6250BFV9K")
+    }
+
+    func testFirmwareVersionWithoutParenthesesIsHidden() throws {
+        try makeVolume("IPOD", sysInfo: "visibleBuildID: 0x04C08000\n")
+
+        XCTAssertNil(scanner.scan().first?.firmwareVersion)
+    }
+
+    /// DMRD ships a zero-byte SysInfo: every cosmetic field stays nil and
+    /// the device still works.
+    func testEmptySysInfoLeavesAllCosmeticFieldsNil() throws {
+        try makeVolume("IPOD", sysInfo: "")
+
+        let device = try XCTUnwrap(scanner.scan().first)
+        XCTAssertNil(device.firmwareVersion)
+        XCTAssertNil(device.serialNumber)
+        XCTAssertNil(device.modelNumber)
+        XCTAssertTrue(device.isSupported)
+    }
+
+    // MARK: - Rockbox detection
+
+    func testRockboxDirectoryWithVersionFile() throws {
+        try makeVolume("IPOD", rockboxInfo: """
+            Version: rockbox-3.15
+            Target: ipodvideo
+            """)
+
+        let device = try XCTUnwrap(scanner.scan().first)
+        XCTAssertTrue(device.hasRockbox)
+        XCTAssertEqual(device.rockboxVersion, "rockbox-3.15")
+    }
+
+    func testRockboxDirectoryWithoutInfoFileStillCounts() throws {
+        try makeVolume("IPOD", rockbox: true)
+
+        let device = try XCTUnwrap(scanner.scan().first)
+        XCTAssertTrue(device.hasRockbox)
+        XCTAssertNil(device.rockboxVersion)
+    }
+
+    func testRockboxInfoWithoutVersionLineGivesNilVersion() throws {
+        try makeVolume("IPOD", rockboxInfo: "Target: ipodvideo\n")
+
+        let device = try XCTUnwrap(scanner.scan().first)
+        XCTAssertTrue(device.hasRockbox)
+        XCTAssertNil(device.rockboxVersion)
+    }
+
+    func testNoRockboxDirectory() throws {
+        try makeVolume("IPOD")
+
+        let device = try XCTUnwrap(scanner.scan().first)
+        XCTAssertFalse(device.hasRockbox)
+        XCTAssertNil(device.rockboxVersion)
+    }
+
+    // MARK: - Volume format and capacity
+
+    /// Fake volumes are temp-dir subtrees, so the resource values resolve
+    /// against the host filesystem — we can only assert they are populated,
+    /// not their exact text.
+    func testVolumeFormatAndCapacityReadFromResourceValues() throws {
+        try makeVolume("IPOD")
+
+        let device = try XCTUnwrap(scanner.scan().first)
+        XCTAssertNotNil(device.volumeFormat)
+        XCTAssertGreaterThan(try XCTUnwrap(device.totalBytes), 0)
     }
 
     // MARK: - Video profile (DevicePrefs sidecar)
