@@ -176,6 +176,10 @@ struct IPodVideoConverter {
             for try await line in stdout.fileHandleForReading.bytes.lines {
                 onLine(line)
             }
+            // AsyncBytes completes an in-flight read at EOF without throwing,
+            // so a cancel that already SIGTERMed the child would otherwise
+            // surface as toolFailed(status: 15) instead of CancellationError.
+            try Task.checkCancellation()
             let tail = String((try await stderrText).suffix(2000))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let status = await exitCodes.first { _ in true } ?? -1
@@ -185,10 +189,17 @@ struct IPodVideoConverter {
         }
     }
 
+    /// Keeps only a rolling tail: corrupt sources can flood stderr with a
+    /// per-packet error line even at `-loglevel error`, and callers only
+    /// ever report the last couple thousand characters.
     private static func collectText(_ handle: FileHandle) async throws -> String {
+        let cap = 4096
         var text = ""
         for try await line in handle.bytes.lines {
             text += line + "\n"
+            if text.count > cap {
+                text.removeFirst(text.count - cap)
+            }
         }
         return text
     }
