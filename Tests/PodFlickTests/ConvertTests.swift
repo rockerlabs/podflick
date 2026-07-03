@@ -45,7 +45,7 @@ final class ConvertTests: XCTestCase {
 
     // MARK: - Progress parsing
 
-    func testProgressParserReadsMicrosecondsAndEnd() {
+    func testProgressParserReadsMicroseconds() {
         var parser = IPodVideoConverter.ProgressParser()
         for line in ["frame=30", "fps=29.9", "out_time_us=1500000",
                      "out_time_ms=1500000", "out_time=00:00:01.500000",
@@ -53,12 +53,9 @@ final class ConvertTests: XCTestCase {
             parser.consume(line: line)
         }
         XCTAssertEqual(parser.outTimeSeconds, 1.5)
-        XCTAssertFalse(parser.finished)
 
         parser.consume(line: "out_time_us=3000000")
-        parser.consume(line: "progress=end")
         XCTAssertEqual(parser.outTimeSeconds, 3.0)
-        XCTAssertTrue(parser.finished)
     }
 
     func testProgressParserIgnoresGarbageAndNA() {
@@ -68,7 +65,6 @@ final class ConvertTests: XCTestCase {
             parser.consume(line: line)
         }
         XCTAssertEqual(parser.outTimeSeconds, 0)
-        XCTAssertFalse(parser.finished)
     }
 
     func testProgressFractionClamps() {
@@ -149,8 +145,7 @@ final class ConvertTests: XCTestCase {
     // MARK: - Tool lookup
 
     func testLocateFindsBothToolsAcrossDirectories() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("PodFlickTools-\(UUID().uuidString)")
+        let root = try makeTempDirectory(prefix: "PodFlickTools")
         defer { try? FileManager.default.removeItem(at: root) }
         let binA = root.appendingPathComponent("a")
         let binB = root.appendingPathComponent("b")
@@ -159,34 +154,24 @@ final class ConvertTests: XCTestCase {
         try makeExecutable(binA.appendingPathComponent("ffmpeg"))
         try makeExecutable(binB.appendingPathComponent("ffprobe"))
 
-        let tools = FFmpegTools.locate(searchPATH: "\(binA.path):\(binB.path)")
+        let tools = FFmpegTools.locate(searchPATH: "\(binA.path):\(binB.path)",
+                                       fallbacks: [])
         XCTAssertEqual(tools?.ffmpeg.path, binA.appendingPathComponent("ffmpeg").path)
         XCTAssertEqual(tools?.ffprobe.path, binB.appendingPathComponent("ffprobe").path)
     }
 
     func testLocateNeedsBothTools() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("PodFlickTools-\(UUID().uuidString)")
+        let root = try makeTempDirectory(prefix: "PodFlickTools")
         defer { try? FileManager.default.removeItem(at: root) }
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try makeExecutable(root.appendingPathComponent("ffmpeg"))
-        // ffprobe missing → the pair is unusable.
-        XCTAssertNil(FFmpegTools.locate(searchPATH: root.path,
-                                        fileManager: TempOnlyFileManager()))
+        // ffprobe missing → the pair is unusable. Empty fallbacks keep the
+        // machine's real install out of the search.
+        XCTAssertNil(FFmpegTools.locate(searchPATH: root.path, fallbacks: []))
     }
 
     private func makeExecutable(_ url: URL) throws {
         try Data("#!/bin/sh\n".utf8).write(to: url)
         try FileManager.default.setAttributes([.posixPermissions: 0o755],
                                               ofItemAtPath: url.path)
-    }
-}
-
-/// Sees executables only under the temp tree, so the machine's real
-/// /opt/homebrew install can't leak in through the fallback directories.
-private final class TempOnlyFileManager: FileManager {
-    override func isExecutableFile(atPath path: String) -> Bool {
-        path.hasPrefix(FileManager.default.temporaryDirectory.path)
-            && super.isExecutableFile(atPath: path)
     }
 }

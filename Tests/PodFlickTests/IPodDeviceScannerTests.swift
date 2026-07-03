@@ -10,10 +10,7 @@ final class IPodDeviceScannerTests: XCTestCase {
     private var scanner: IPodDeviceScanner!
 
     override func setUpWithError() throws {
-        volumesRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("PodFlickVolumes-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: volumesRoot,
-                                                withIntermediateDirectories: true)
+        volumesRoot = try makeTempDirectory(prefix: "PodFlickVolumes")
         scanner = IPodDeviceScanner(volumesDirectory: volumesRoot)
     }
 

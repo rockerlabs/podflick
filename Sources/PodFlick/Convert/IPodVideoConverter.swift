@@ -18,6 +18,8 @@ struct IPodVideoConverter {
     // MARK: - Probe
 
     func probe(_ input: URL) async throws -> VideoProbe {
+        // Joining lines without newlines is safe: JSON forbids raw newlines
+        // inside strings, so structure survives.
         var json = ""
         let result = try await Self.run(tools.ffprobe, arguments: [
             "-v", "error",
@@ -35,12 +37,17 @@ struct IPodVideoConverter {
     // MARK: - Convert
 
     /// Writes the converted video to `output` (overwriting), reporting
-    /// progress in [0, 1]. `durationSeconds` comes from `probe(_:)`.
+    /// progress in [0, 1]. Requiring the `probe(_:)` result (rather than a
+    /// bare duration) encodes the probe→convert ordering in the signature.
     /// On failure or cancellation the half-written output is removed.
+    ///
+    /// `onProgress` fires only when the fraction changes, on the
+    /// stdout-reading task — UI consumers hop to the main actor themselves.
     func convert(_ input: URL, to output: URL, title: String,
-                 durationSeconds: Double,
-                 onProgress: @escaping (Double) -> Void = { _ in }) async throws {
+                 probe: VideoProbe,
+                 onProgress: @escaping @Sendable (Double) -> Void = { _ in }) async throws {
         var parser = ProgressParser()
+        var lastReported = -1.0
         do {
             let result = try await Self.run(
                 tools.ffmpeg,
@@ -48,7 +55,11 @@ struct IPodVideoConverter {
                                                     title: title)
             ) { line in
                 parser.consume(line: line)
-                onProgress(parser.fraction(ofTotal: durationSeconds))
+                let fraction = parser.fraction(ofTotal: probe.durationSeconds)
+                if fraction != lastReported {
+                    lastReported = fraction
+                    onProgress(fraction)
+                }
             }
             guard result.status == 0 else {
                 throw ConversionError.toolFailed(
@@ -58,7 +69,7 @@ struct IPodVideoConverter {
             try? FileManager.default.removeItem(at: output)
             throw error
         }
-        onProgress(1)
+        if lastReported != 1 { onProgress(1) }
     }
 
     /// The full ffmpeg invocation for one file. Pure, so tests can pin it
@@ -104,8 +115,7 @@ struct IPodVideoConverter {
     /// DB title mhod need a value the firmware can render.
     static func title(for input: URL) -> String {
         let stem = input.deletingPathExtension().lastPathComponent
-        let cleaned = String(String.UnicodeScalarView(
-            stem.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }))
+        let cleaned = stem.components(separatedBy: .controlCharacters).joined()
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return cleaned.isEmpty ? "Untitled" : cleaned
     }
@@ -115,23 +125,17 @@ struct IPodVideoConverter {
     /// Accumulates the `key=value` line stream of `ffmpeg -progress pipe:1`.
     struct ProgressParser {
         private(set) var outTimeSeconds: Double = 0
-        private(set) var finished = false
 
         mutating func consume(line: String) {
             let parts = line.split(separator: "=", maxSplits: 1)
-            guard parts.count == 2 else { return }
-            switch parts[0] {
-            case "out_time_us", "out_time_ms":
-                // Both fields are microseconds — out_time_ms is a misnamed
-                // ffmpeg field, not milliseconds. Value is "N/A" until the
-                // first frame lands, which Double(_:) rejects as intended.
-                if let microseconds = Double(parts[1]) {
-                    outTimeSeconds = microseconds / 1_000_000
-                }
-            case "progress":
-                finished = parts[1] == "end"
-            default:
-                break
+            guard parts.count == 2,
+                  parts[0] == "out_time_us" || parts[0] == "out_time_ms"
+            else { return }
+            // Both fields are microseconds — out_time_ms is a misnamed
+            // ffmpeg field, not milliseconds. Value is "N/A" until the
+            // first frame lands, which Double(_:) rejects as intended.
+            if let microseconds = Double(parts[1]) {
+                outTimeSeconds = microseconds / 1_000_000
             }
         }
 
@@ -174,8 +178,7 @@ struct IPodVideoConverter {
             }
             let tail = String((try await stderrText).suffix(2000))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            var status: Int32 = -1
-            for await code in exitCodes { status = code }
+            let status = await exitCodes.first { _ in true } ?? -1
             return (status, tail)
         } onCancel: {
             process.terminate()
