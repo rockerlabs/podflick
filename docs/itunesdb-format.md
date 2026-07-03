@@ -103,9 +103,12 @@ Child mhods, in order: type 1 (title), type 6 (kind string
 
 ## mhod — string types 1 (title) / 2 (path)
 
-`hdr 0x18; total = (0x18+16+len+3)&~3`; payload: `encoding=1(u32),
+`hdr 0x18; total = 0x18+16+len` — EXACT, never rounded up: Finder writes
+unaligned totals (86, 118 in the fixtures) and the firmware rejects a DB
+whose title mhod carries trailing alignment padding (proven on device
+2026-07-04: 2 pad bytes → empty menus). Payload: `encoding=1(u32),
 byte_len(u32), flag=1(u32), pad(u32)`, then UTF-16LE bytes. Type 6 (kind) is
-similar but unpadded with the flag at payload+8 — clone it from a donor.
+similar with the flag at payload+8 — clone it from a donor.
 
 ## mhip — playlist member (0x4C header, 0x78 total incl. child)
 
@@ -155,12 +158,15 @@ counters/sizes; delete the media file.
 **Golden test**: the parser must round-trip `reference/fixtures/*` and the
 writer's `--selftest` must regenerate the single-track fixture byte-exactly.
 
-## Video file requirements (5.5G stock firmware)
+## Video file requirements (5G vs 5.5G stock firmware)
 
-H.264 Baseline (Low-Complexity) ≤640×480 ≤1.5 Mbps ≤30fps + AAC-LC stereo
-≤160 kbps ≤48 kHz, in .m4v/.mp4/.mov. The firmware silently rejects anything
-else (won't even list… actually it lists what the DB says — it just won't
-play out-of-spec files, and Finder refuses to sync them). Legacy MPEG-4 SP
-alternative: ≤2.5 Mbps. ffmpeg recipe: see `reference/convert_to_ipod.sh`.
+5G: H.264 Baseline ≤L1.3 ≤320×240 ≤768 kbps. 5.5G adds a Low-Complexity
+640×480 ≤1.5 Mbps H.264 mode. Both: ≤30fps + AAC-LC stereo ≤160 kbps
+≤48 kHz, in .m4v/.mp4/.mov. The firmware lists what the DB says but won't
+play out-of-spec files — a 640×480 L3.0 file on the real 5G decodes to a
+black screen with a running timer (B.5.1 smoke, 2026-07-04); every file
+proven playing on it is 320×240 L1.3. Legacy MPEG-4 SP alternative:
+≤2.5 Mbps. PodFlick encodes to the 5G limit so output plays on both;
+`reference/convert_to_ipod.sh`'s 640×480 recipe is the 5.5G-only variant.
 Beware pre-UTF-8 metadata: a Windows-1251 `©nam` tag gave Finder an empty
 title (PodFlick should transcode/set the title tag itself).

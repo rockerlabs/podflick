@@ -7,9 +7,11 @@ final class ConvertTests: XCTestCase {
 
     // MARK: - Conversion arguments
 
-    /// Pins the invocation to the on-device-proven recipe
-    /// (reference/convert_to_ipod.sh). A drift here is a firmware-facing
-    /// change and needs a real-device re-proof before it lands.
+    /// Pins the invocation to the recipe proven on the real 5G during the
+    /// B.5.1 smoke (320×240 L1.3 ≤768 kbps — the 5G decoder limit; the
+    /// 640×480 L3.0 reference recipe played black). A drift here is a
+    /// firmware-facing change and needs a real-device re-proof before it
+    /// lands.
     func testConversionArgumentsMatchProvenRecipe() {
         let arguments = IPodVideoConverter.conversionArguments(
             input: URL(fileURLWithPath: "/in/movie.mkv"),
@@ -23,13 +25,13 @@ final class ConvertTests: XCTestCase {
             "-sn", "-dn",
             "-c:v", "libx264",
             "-profile:v", "baseline",
-            "-level", "3.0",
+            "-level", "1.3",
             "-pix_fmt", "yuv420p",
-            "-vf", "scale=640:480:force_original_aspect_ratio=decrease,"
+            "-vf", "scale=320:240:force_original_aspect_ratio=decrease,"
                  + "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-            "-b:v", "1200k",
-            "-maxrate", "1500k",
-            "-bufsize", "3000k",
+            "-b:v", "700k",
+            "-maxrate", "768k",
+            "-bufsize", "1536k",
             "-r", "30",
             "-c:a", "aac",
             "-b:a", "128k",
