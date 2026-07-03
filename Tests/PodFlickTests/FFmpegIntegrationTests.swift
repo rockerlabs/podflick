@@ -15,10 +15,7 @@ final class FFmpegIntegrationTests: XCTestCase {
             throw XCTSkip("ffmpeg/ffprobe not installed")
         }
         tools = located
-        workDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("PodFlickConvert-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: workDir,
-                                                withIntermediateDirectories: true)
+        workDir = try makeTempDirectory(prefix: "PodFlickConvert")
     }
 
     override func tearDownWithError() throws {
@@ -65,11 +62,11 @@ final class FFmpegIntegrationTests: XCTestCase {
         var fractions: [Double] = []
         try await converter.convert(
             source, to: output, title: "Чистый заголовок",
-            durationSeconds: sourceProbe.durationSeconds) { fractions.append($0) }
+            probe: sourceProbe) { fractions.append($0) }
 
-        // Progress fired, never ran backwards, and landed on 1.
+        // Progress fired, never repeated or ran backwards, and landed on 1.
         XCTAssertFalse(fractions.isEmpty)
-        XCTAssertEqual(fractions, fractions.sorted())
+        XCTAssertEqual(fractions, Array(Set(fractions)).sorted())
         XCTAssertEqual(fractions.last, 1)
 
         // Output is inside the 5.5G envelope (docs/itunesdb-format.md) and
@@ -89,9 +86,11 @@ final class FFmpegIntegrationTests: XCTestCase {
         try Data("junk".utf8).write(to: source)
         let output = workDir.appendingPathComponent("out.m4v")
 
+        // Junk can't be probed, so hand-build the probe result convert wants.
+        let fakeProbe = VideoProbe(durationSeconds: 1, videoCodec: "h264")
         do {
             try await IPodVideoConverter(tools: tools).convert(
-                source, to: output, title: "X", durationSeconds: 1)
+                source, to: output, title: "X", probe: fakeProbe)
             XCTFail("conversion of junk input must fail")
         } catch let IPodVideoConverter.ConversionError.toolFailed(tool, status, detail) {
             XCTAssertEqual(tool, "ffmpeg")

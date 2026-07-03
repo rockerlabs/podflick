@@ -20,25 +20,25 @@ struct FFmpegTools {
     ]
 
     /// Finds both binaries, or nil when either is missing (the UI should
-    /// then point the user at `brew install ffmpeg`).
+    /// then point the user at `brew install ffmpeg`). Both directory lists
+    /// are injectable so tests search only their temp tree.
     static func locate(
         searchPATH: String? = ProcessInfo.processInfo.environment["PATH"],
-        fileManager: FileManager = .default
+        fallbacks: [String] = fallbackDirectories
     ) -> FFmpegTools? {
         let pathDirectories = searchPATH?.split(separator: ":").map(String.init) ?? []
-        let directories = pathDirectories + fallbackDirectories
-        guard let ffmpeg = find("ffmpeg", in: directories, fileManager: fileManager),
-              let ffprobe = find("ffprobe", in: directories, fileManager: fileManager)
+        let directories = pathDirectories + fallbacks
+        guard let ffmpeg = find("ffmpeg", in: directories),
+              let ffprobe = find("ffprobe", in: directories)
         else { return nil }
         return FFmpegTools(ffmpeg: ffmpeg, ffprobe: ffprobe)
     }
 
-    private static func find(_ name: String, in directories: [String],
-                             fileManager: FileManager) -> URL? {
+    private static func find(_ name: String, in directories: [String]) -> URL? {
         for directory in directories {
             let candidate = URL(fileURLWithPath: directory)
                 .appendingPathComponent(name)
-            if fileManager.isExecutableFile(atPath: candidate.path) {
+            if FileManager.default.isExecutableFile(atPath: candidate.path) {
                 return candidate
             }
         }

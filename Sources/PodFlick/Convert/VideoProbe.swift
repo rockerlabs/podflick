@@ -15,11 +15,11 @@ struct VideoProbe: Equatable {
 
     var durationSeconds: Double
     var videoCodec: String
-    var videoProfile: String?
-    var width: Int?
-    var height: Int?
-    var audioCodec: String?
-    var title: String?
+    var videoProfile: String? = nil
+    var width: Int? = nil
+    var height: Int? = nil
+    var audioCodec: String? = nil
+    var title: String? = nil
 
     /// Decodes `ffprobe -print_format json -show_format -show_streams`
     /// output. Split from the process run so it is testable on captured JSON.
