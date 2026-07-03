@@ -310,8 +310,10 @@ final class SyncModel: ObservableObject {
     /// device itself, so it follows the hardware). Applies to conversions
     /// started after the change; already-queued items pick it up because
     /// `process` re-reads the device per item.
+    /// No equality guard against the device snapshot: it goes stale while
+    /// a write is in flight and would silently drop a quick second toggle.
+    /// The write is idempotent and serialized by the queue anyway.
     func setVideoProfile(_ profile: VideoProfile) {
-        guard let device = selectedDevice, device.videoProfile != profile else { return }
         performDeviceWrite { volume in
             var prefs = DevicePrefs.load(volumeURL: volume)
             prefs.videoProfile = profile
