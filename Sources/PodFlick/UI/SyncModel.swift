@@ -6,10 +6,28 @@ import Foundation
 /// load-splice-write cycles on the same file would silently drop one of
 /// them (e.g. a queue upload racing a user's remove), so adds, removes and
 /// renames all funnel through this one actor.
+///
+/// The queue is also the eject gate: `close()` doubles as a barrier (the
+/// actor is non-reentrant through the synchronous `run` body, so by the
+/// time it returns any in-flight write has finished) and every later `run`
+/// is rejected until `reopen()` — writers are excluded by the mechanism
+/// they already funnel through, not by per-callsite flags.
 actor DeviceWriteQueue {
-    func run<T: Sendable>(_ body: @Sendable () throws -> T) rethrows -> T {
-        try body()
+    struct ClosedForEject: Error, CustomStringConvertible {
+        var description: String {
+            "eject in progress — reconnect the iPod to make changes"
+        }
     }
+
+    private var isClosed = false
+
+    func run<T: Sendable>(_ body: @Sendable () throws -> T) throws -> T {
+        guard !isClosed else { throw ClosedForEject() }
+        return try body()
+    }
+
+    func close() { isClosed = true }
+    func reopen() { isClosed = false }
 }
 
 /// UI state for the whole app: connected devices, the upload queue with
@@ -50,14 +68,15 @@ final class SyncModel: ObservableObject {
     /// Last failed device read/write outside the queue (list load, remove,
     /// rename, eject); the queue reports its failures on the item instead.
     @Published var deviceError: String?
-    @Published private(set) var isEjecting = false
+    @Published private(set) var ejectTask: Task<Void, Never>?
 
     let tools: FFmpegTools?
     private let scanner: IPodDeviceScanner
     private let ejector: IPodEjector
     private let writeQueue = DeviceWriteQueue()
     private var worker: Task<Void, Never>?
-    private var ejectTask: Task<Void, Never>?
+
+    var isEjecting: Bool { ejectTask != nil }
 
     var selectedDevice: IPodDevice? {
         devices.first { $0.volumeURL == selectedVolume }
@@ -241,29 +260,27 @@ final class SyncModel: ObservableObject {
 
     /// Sync + clean eject of the selected device (never forced). Refused
     /// while uploads run — an eject mid-copy would strand a half-written
-    /// file; finished DB writes are additionally waited out via the write
-    /// queue barrier below.
+    /// file. On success the didUnmount notification drives the device-list
+    /// refresh; on failure nothing on the device changed.
     func eject() {
         guard let device = selectedDevice, !isEjecting else { return }
         guard !queueIsBusy else {
             deviceError = "uploads in progress — wait for the queue to finish before ejecting"
             return
         }
-        isEjecting = true
         deviceError = nil
         let volume = device.volumeURL
         ejectTask = Task {
+            // close() is both the barrier for a remove/rename fired just
+            // before the eject click and the gate rejecting writes for the
+            // eject's duration.
+            await writeQueue.close()
             do {
-                // Barrier: a remove/rename fired just before the eject click
-                // may still hold the write queue. isEjecting (set above)
-                // blocks NEW writes, so after this the DB is quiescent.
-                await writeQueue.run {}
                 try await ejector.eject(volume: volume)
             } catch {
                 deviceError = "\(error)"
             }
-            isEjecting = false
-            refreshDevices()
+            await writeQueue.reopen()   // other connected iPods stay writable
             ejectTask = nil
         }
     }
@@ -288,10 +305,6 @@ final class SyncModel: ObservableObject {
     private func performDeviceWrite(
         _ body: @escaping @Sendable (IPodLibrary) throws -> Void
     ) {
-        guard !isEjecting else {
-            deviceError = "eject in progress — reconnect the iPod to make changes"
-            return
-        }
         guard let device = selectedDevice else { return }
         let library = IPodLibrary(volumeURL: device.volumeURL)
         Task {
