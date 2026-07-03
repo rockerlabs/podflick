@@ -198,7 +198,6 @@ private struct DeviceHeaderView: View {
                 Image(systemName: "arrow.clockwise")
             }
             .help("Rescan for iPods")
-            .disabled(model.isEjecting)
         }
         .padding(12)
     }

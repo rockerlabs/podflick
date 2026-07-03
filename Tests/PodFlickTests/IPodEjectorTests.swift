@@ -15,59 +15,33 @@ final class IPodEjectorTests: XCTestCase {
         try FileManager.default.removeItem(at: volume)
     }
 
-    /// Thread-safe event log the @Sendable seams can append to.
-    private final class EventLog: @unchecked Sendable {
-        private let lock = NSLock()
-        private var entries: [String] = []
+    func testFlushesOnceAndRetriesUntilUnmountSucceeds() async throws {
+        let unmounts = Recorder<URL>()
+        let flushes = Recorder<Void>()
+        let ejector = makeStubEjector(unmounts: unmounts, failFirst: 2,
+                                      onFlush: { flushes.append(()) })
 
-        func append(_ entry: String) {
-            lock.lock(); defer { lock.unlock() }
-            entries.append(entry)
-        }
+        try await ejector.eject(volume: volume)
 
-        var all: [String] {
-            lock.lock(); defer { lock.unlock() }
-            return entries
-        }
-    }
-
-    private func makeEjector(log: EventLog, failFirst failures: Int,
-                             maxAttempts: Int = 5) -> IPodEjector {
-        var ejector = IPodEjector()
-        ejector.maxAttempts = maxAttempts
-        ejector.retryDelay = .milliseconds(1)
-        ejector.flushFileCaches = { log.append("flush") }
-        ejector.unmount = { _ in
-            log.append("unmount")
-            if log.all.filter({ $0 == "unmount" }).count <= failures {
-                throw NSError(domain: "test", code: 1, userInfo:
-                    [NSLocalizedDescriptionKey: "volume is busy"])
-            }
-        }
-        return ejector
-    }
-
-    func testFlushesThenRetriesUntilUnmountSucceeds() async throws {
-        let log = EventLog()
-        try await makeEjector(log: log, failFirst: 2).eject(volume: volume)
-
-        XCTAssertEqual(log.all, ["flush", "unmount", "unmount", "unmount"],
-                       "one flush up front, then retries until success")
+        XCTAssertEqual(flushes.recorded.count, 1)
+        XCTAssertEqual(unmounts.recorded.count, 3,
+                       "two busy failures, then success")
         XCTAssertTrue(FileManager.default.fileExists(atPath:
             volume.appendingPathComponent(".metadata_never_index").path),
             "the Spotlight opt-out marker must be dropped on the volume")
     }
 
     func testGivesUpAfterMaxAttemptsAndNamesSpotlight() async throws {
-        let log = EventLog()
-        let ejector = makeEjector(log: log, failFirst: .max, maxAttempts: 3)
+        let unmounts = Recorder<URL>()
+        let ejector = makeStubEjector(unmounts: unmounts, failFirst: .max,
+                                      maxAttempts: 3)
 
         do {
             try await ejector.eject(volume: volume)
             XCTFail("expected EjectFailure")
         } catch let failure as IPodEjector.EjectFailure {
             XCTAssertEqual(failure.attempts, 3)
-            XCTAssertEqual(log.all.filter { $0 == "unmount" }.count, 3)
+            XCTAssertEqual(unmounts.recorded.count, 3)
             XCTAssertTrue(failure.description.contains("Spotlight"),
                           failure.description)
             XCTAssertTrue(failure.description.contains("volume is busy"),
@@ -80,7 +54,8 @@ final class IPodEjectorTests: XCTestCase {
         let marker = volume.appendingPathComponent(".metadata_never_index")
         try Data("keep me".utf8).write(to: marker)
 
-        try await makeEjector(log: EventLog(), failFirst: 0).eject(volume: volume)
+        try await makeStubEjector(unmounts: Recorder<URL>())
+            .eject(volume: volume)
 
         XCTAssertEqual(try String(contentsOf: marker, encoding: .utf8), "keep me")
     }

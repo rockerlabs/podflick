@@ -35,15 +35,13 @@ struct IPodEjector: Sendable {
         try NSWorkspace.shared.unmountAndEjectDevice(at: $0)
     }
 
-    /// Nonisolated-async on purpose: runs on the global executor, so the
-    /// (potentially seconds-long) unmount never blocks the main thread.
     func eject(volume: URL) async throws {
-        flushFileCaches()
+        try await blocking(flushFileCaches)
         discourageSpotlight(on: volume)
         var lastError = "no error reported"
         for attempt in 1...maxAttempts {
             do {
-                return try unmount(volume)
+                return try await blocking { try unmount(volume) }
             } catch {
                 lastError = error.localizedDescription
                 if attempt < maxAttempts { try await Task.sleep(for: retryDelay) }
@@ -51,6 +49,19 @@ struct IPodEjector: Sendable {
         }
         throw EjectFailure(volumeName: volume.lastPathComponent,
                            attempts: maxAttempts, underlying: lastError)
+    }
+
+    /// `sync` and a dissented unmount block for seconds — too long to pin
+    /// a width-limited cooperative-pool thread (and far too long for the
+    /// main thread), so each attempt hops to a GCD thread for its duration.
+    private func blocking<T: Sendable>(
+        _ body: @escaping @Sendable () throws -> T
+    ) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(with: Result { try body() })
+            }
+        }
     }
 
     /// Best-effort `.metadata_never_index` marker: Spotlight skips volumes
