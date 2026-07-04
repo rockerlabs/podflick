@@ -374,7 +374,7 @@ private struct QueueRowView: View {
     let deviceLabel: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Image(systemName: symbol)
                     .foregroundStyle(symbolColor)
@@ -389,9 +389,11 @@ private struct QueueRowView: View {
                     .font(.caption)
                     .foregroundStyle(stageIsFailure ? .red : .secondary)
             }
-            if let fraction = progressFraction {
-                ProgressView(value: fraction)
-                    .controlSize(.small)
+            // Only the item being processed shows the stepper — uploads run
+            // one at a time, so waiting/done/failed rows stay a compact line.
+            if let activeStep = item.stage.activeStep {
+                PipelineStepper(activeStep: activeStep,
+                                fraction: item.stage.stepFraction)
             }
         }
     }
@@ -399,13 +401,6 @@ private struct QueueRowView: View {
     private var stageIsFailure: Bool {
         if case .failed = item.stage { return true }
         return false
-    }
-
-    private var progressFraction: Double? {
-        switch item.stage {
-        case .converting(let fraction), .copying(let fraction): return fraction
-        default: return nil
-        }
     }
 
     private var symbol: String {
@@ -424,6 +419,77 @@ private struct QueueRowView: View {
         case .failed: return .red
         default: return .secondary
         }
+    }
+}
+
+/// The 1—2—3 pipeline strip under the in-progress queue row: a checked circle
+/// per completed step, an accent ring on the active one, and the connectors
+/// filling with the active step's fine progress.
+private struct PipelineStepper: View {
+    let activeStep: Int
+    let fraction: Double?
+
+    private var count: Int { SyncModel.Stage.stepTitles.count }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<count, id: \.self) { step in
+                node(step)
+                if step < count - 1 {
+                    connector(fill: fillOfConnector(after: step))
+                }
+            }
+        }
+        .frame(height: 16)
+    }
+
+    /// The connector between step `i` and `i+1` visualizes step `i+1`'s work,
+    /// so both the convert and the copy phases fill their own segment: full
+    /// once that step is done, filling with its fine progress while active,
+    /// empty before it starts. The active step that reports no fraction (the
+    /// brief DB-write tail of Copy) reads as full.
+    private func fillOfConnector(after i: Int) -> Double {
+        let phase = i + 1
+        if activeStep > phase { return 1 }
+        if activeStep == phase { return fraction ?? 1 }
+        return 0
+    }
+
+    @ViewBuilder
+    private func node(_ i: Int) -> some View {
+        let isDone = i < activeStep
+        let isActive = i == activeStep
+        ZStack {
+            Circle()
+                .fill(isDone ? Color.accentColor : Color(nsColor: .windowBackgroundColor))
+                .overlay(
+                    Circle().strokeBorder(
+                        isDone || isActive ? Color.accentColor
+                                           : Color.secondary.opacity(0.5),
+                        lineWidth: 1.5))
+            if isDone {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.white)
+            } else {
+                Text("\(i + 1)")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(isActive ? Color.accentColor : .secondary)
+            }
+        }
+        .frame(width: 16, height: 16)
+        .help(SyncModel.Stage.stepTitles[i])
+    }
+
+    private func connector(fill: Double) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.secondary.opacity(0.3))
+                Capsule().fill(Color.accentColor)
+                    .frame(width: geo.size.width * max(0, min(1, fill)))
+            }
+        }
+        .frame(height: 3)
     }
 }
 

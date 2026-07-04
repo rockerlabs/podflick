@@ -63,6 +63,46 @@ final class SyncModel: ObservableObject {
             case .failed(let message): return message
             }
         }
+
+        /// The pipeline steps shown as a 1—2—3 stepper in the window. The DB
+        /// write is folded into the last step: it's brief and reads as part of
+        /// the same "getting it onto the iPod" phase as the copy.
+        static let stepTitles = ["Analyze", "Convert", "Copy"]
+
+        /// Index into `stepTitles` of the step currently in progress, or nil
+        /// for the states that map to no single active step — before it starts
+        /// (`waiting`), once it's finished (`done`), or on `failed`.
+        var activeStep: Int? {
+            switch self {
+            case .probing: return 0
+            case .converting: return 1
+            case .copying, .updatingDatabase: return 2
+            case .waiting, .done, .failed: return nil
+            }
+        }
+
+        /// Fine-grained 0…1 progress within the active step, when the step
+        /// reports it (convert and copy do; analyze and the DB write don't).
+        var stepFraction: Double? {
+            switch self {
+            case .converting(let fraction), .copying(let fraction): return fraction
+            default: return nil
+            }
+        }
+
+        /// A single 0…1 value across the whole pipeline, for the compact
+        /// status-menu progress bar. Weighted so the long convert phase owns
+        /// most of the bar. nil before work starts and after it ends — those
+        /// rows show text (or a checkmark), not a bar.
+        var overallProgress: Double? {
+            switch self {
+            case .waiting, .done, .failed: return nil
+            case .probing: return 0.02
+            case .converting(let fraction): return 0.05 + fraction * 0.75
+            case .copying(let fraction): return 0.80 + fraction * 0.15
+            case .updatingDatabase: return 0.95
+            }
+        }
     }
 
     /// Where an upload came from. Drops report progress in the window;
