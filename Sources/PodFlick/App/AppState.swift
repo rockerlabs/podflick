@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import UserNotifications
 
 /// App-wide coordination for the two background entry points (B.9): the Finder
@@ -8,14 +9,15 @@ import UserNotifications
 /// already open (keep the window; the queue list shows progress).
 ///
 /// The queue, device targeting and the single-mutator DB write all live in
-/// `SyncModel.shared`; this type only owns the *presentation* of background
-/// transfers: activation policy, an AppKit `NSStatusItem` menu (SwiftUI's
-/// `MenuBarExtra` pegs the main thread in an image-render loop here), and
-/// completion notifications.
+/// `SyncModel.shared`; this type owns the *presentation*: the main window
+/// (AppKit-owned so a quiet launch never creates it — a SwiftUI Window scene
+/// auto-opens at launch and flashed before it could be hidden), the activation
+/// policy, an AppKit `NSStatusItem` menu (SwiftUI's `MenuBarExtra` pegs the
+/// main thread in an image-render loop here), and completion notifications.
 ///
-/// NOTE: the quiet-launch handling (launch-phase classification, hiding the
-/// auto-opened window, activation policy) is macOS window-server behavior with
-/// no headless-testable surface — verify it by hand on a real Mac.
+/// NOTE: the quiet-launch handling (launch-phase classification, window
+/// suppression, activation policy) is macOS window-server behavior with no
+/// headless-testable surface — verify it by hand on a real Mac.
 @MainActor
 final class AppState: NSObject, NSMenuDelegate {
     static let shared = AppState()
@@ -41,9 +43,10 @@ final class AppState: NSObject, NSMenuDelegate {
     /// The menu-bar item, present only in background mode.
     private var statusItem: NSStatusItem?
 
-    /// The window hidden on entering background mode, re-shown on exit. Hidden
-    /// (orderOut) rather than closed so SwiftUI keeps its scene bookkeeping.
-    private weak var hiddenWindow: NSWindow?
+    /// The one main window, created lazily on the first windowed use and
+    /// reused ever after (isReleasedWhenClosed = false). nil on a quiet
+    /// launch until the user asks for it — that is what kills the flash.
+    private var mainWindow: NSWindow?
 
     private override init() {
         super.init()
@@ -56,9 +59,19 @@ final class AppState: NSObject, NSMenuDelegate {
 
     func applicationDidFinishLaunching() {
         // A launch-time service/URL event is delivered within this same
-        // runloop pass; clearing the flag one turn later lets those be seen
-        // as the launch reason while later requests count as "app running".
-        DispatchQueue.main.async { [weak self] in self?.launchPhase = false }
+        // runloop pass, BEFORE this async block runs — so a background
+        // request has already set isBackgroundMode by the time we decide
+        // whether this launch gets a window. A normal launch gets one here.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.launchPhase = false
+            if !self.isBackgroundMode { self.showMainWindow() }
+        }
+    }
+
+    /// Dock-icon click (or app reopen) with no visible window.
+    func applicationShouldHandleReopen() {
+        if !isBackgroundMode { showMainWindow() }
     }
 
     // MARK: - Transfer requests
@@ -79,19 +92,36 @@ final class AppState: NSObject, NSMenuDelegate {
         model.enqueueBackground(files)
     }
 
+    // MARK: - Main window (AppKit-owned)
+
+    /// Shows (creating on first use) the one main window and brings the app
+    /// forward as a regular windowed app.
+    func showMainWindow() {
+        NSApp.setActivationPolicy(.regular)
+        if mainWindow == nil {
+            let hosting = NSHostingController(rootView: ContentView(model: model))
+            let window = NSWindow(contentViewController: hosting)
+            window.title = "PodFlick"
+            window.setContentSize(NSSize(width: 720, height: 560))
+            window.contentMinSize = NSSize(width: 560, height: 460)
+            window.isReleasedWhenClosed = false   // closed = hidden, reused later
+            window.setFrameAutosaveName("PodFlickMain")
+            window.center()
+            mainWindow = window
+        }
+        mainWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     // MARK: - Background mode
 
-    /// Go windowless: no Dock icon, hide the window the scene auto-opened at
-    /// launch, and show the status item as the way back into the app.
+    /// Quiet mode for a cold service/URL launch: no Dock icon, no window (none
+    /// was ever created — see applicationDidFinishLaunching), just the status
+    /// item as the way back into the app.
     private func enterBackgroundMode() {
         guard !isBackgroundMode else { return }
         isBackgroundMode = true
         NSApp.setActivationPolicy(.accessory)
-        for window in NSApp.windows
-        where window.canBecomeMain && window.styleMask.contains(.titled) {
-            hiddenWindow = window
-            window.orderOut(nil)
-        }
         showStatusItem()
     }
 
@@ -101,10 +131,7 @@ final class AppState: NSObject, NSMenuDelegate {
         guard isBackgroundMode else { return }
         isBackgroundMode = false
         hideStatusItem()
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        hiddenWindow?.makeKeyAndOrderFront(nil)
-        hiddenWindow = nil
+        showMainWindow()
     }
 
     // MARK: - Status item
@@ -116,6 +143,7 @@ final class AppState: NSObject, NSMenuDelegate {
                                      accessibilityDescription: "PodFlick transfers")
         let menu = NSMenu()
         menu.delegate = self    // rebuilt from the live queue each time it opens
+        menu.autoenablesItems = false
         item.menu = menu
         // Force visibility: created during a cold/accessory launch, the item's
         // isVisible defaults to false and it never renders otherwise.
@@ -132,25 +160,56 @@ final class AppState: NSObject, NSMenuDelegate {
         menu.removeAllItems()
         let background = model.queue.filter { $0.origin == .background }
         for item in background {
-            menu.addItem(withTitle: "\(item.title) — \(item.stage.label)",
-                         action: nil, keyEquivalent: "")
+            let row = menu.addItem(withTitle: "\(item.title) — \(item.stage.label)",
+                                   action: nil, keyEquivalent: "")
+            row.isEnabled = false   // informational rows
         }
         if !background.isEmpty { menu.addItem(.separator()) }
         addItem(to: menu, "Open PodFlick", #selector(openMainWindow))
         if background.contains(where: \.stage.isFinished) {
             addItem(to: menu, "Clear finished", #selector(clearFinished))
         }
+        // Eject without having to open the app — the whole point of a quiet
+        // transfer is not summoning the window just to unplug safely.
+        if let device = model.selectedDevice {
+            let eject = addItem(to: menu, "Eject \(device.name)",
+                                #selector(ejectSelectedDevice))
+            eject.isEnabled = !model.queueIsBusy && !model.isEjecting
+        }
         menu.addItem(.separator())
         addItem(to: menu, "Quit PodFlick", #selector(quit))
     }
 
-    private func addItem(to menu: NSMenu, _ title: String, _ action: Selector) {
-        menu.addItem(withTitle: title, action: action, keyEquivalent: "").target = self
+    @discardableResult
+    private func addItem(to menu: NSMenu, _ title: String,
+                         _ action: Selector) -> NSMenuItem {
+        let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
+        item.target = self
+        return item
     }
 
     @objc private func openMainWindow() { exitBackgroundMode() }
     @objc private func clearFinished() { model.clearFinished() }
     @objc private func quit() { NSApp.terminate(nil) }
+
+    /// Eject from the status menu: fire the model's eject and report the
+    /// outcome as a notification (the window that normally shows the error
+    /// banner may not exist).
+    @objc private func ejectSelectedDevice() {
+        guard let device = model.selectedDevice else { return }
+        let name = device.name
+        model.eject()
+        Task { [weak self] in
+            guard let self else { return }
+            await self.model.waitUntilEjectFinished()
+            if let error = self.model.deviceError {
+                self.notify(title: "Eject failed", body: error)
+            } else {
+                self.notify(title: "Safe to disconnect",
+                            body: "\(name) has been ejected.")
+            }
+        }
+    }
 
     // MARK: - Notifications
 

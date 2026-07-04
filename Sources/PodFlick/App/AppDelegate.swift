@@ -27,10 +27,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Keep the app alive when the window closes: it may be running a quiet
-    /// background transfer (windowless), and on a cold service/URL launch the
-    /// single Window scene would otherwise terminate the app the instant
-    /// AppState hides the auto-opened window.
+    /// background transfer (windowless). The window is reused on reopen.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    /// Dock-icon click with no visible window → re-show the main window.
+    func applicationShouldHandleReopen(_ sender: NSApplication,
+                                       hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { AppState.shared.applicationShouldHandleReopen() }
+        return true
     }
 }
