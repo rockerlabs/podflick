@@ -30,6 +30,12 @@ targets:
       properties:
         LSApplicationCategoryType: public.app-category.utilities
         NSHighResolutionCapable: true
+        # Version strings come from the MARKETING_VERSION /
+        # CURRENT_PROJECT_VERSION build settings below (single source of
+        # truth) rather than being pinned literally here. Xcode expands the
+        # $(...) references while processing Info.plist.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         # Launch as an agent (no Dock icon): a quiet service/URL launch must
         # show NOTHING — the Dock tile otherwise flashes before AppState can
         # switch to .accessory. A normal launch is promoted to .regular (Dock
@@ -55,6 +61,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.dbudnikau.podflick
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: NO
+        # Single source of truth for the app version; bump these per release.
+        # Wired into CFBundleShortVersionString/CFBundleVersion above.
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
   PodFlickTests:
     type: bundle.unit-test
     platform: macOS
