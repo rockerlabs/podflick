@@ -203,6 +203,29 @@ final class IPodLibraryTests: XCTestCase {
         XCTAssertEqual(try onDeviceDB, writer.data)
     }
 
+    func testAddFailsCleanlyWhenCopyThrows() throws {
+        // A directory passed as the source opens but cannot be read as a
+        // file, so `copy` raises. The add must abort with the DB, backups,
+        // and media file all untouched — the same catch that guards a
+        // mid-stream copy failure (a volume yanked while copying) from
+        // leaving a half-written orphan behind.
+        let original = try onDeviceDB
+        let badSource = workDir.appendingPathComponent("not-a-file.m4v")
+        try FileManager.default.createDirectory(
+            at: badSource, withIntermediateDirectories: true)
+
+        XCTAssertThrowsError(try library.add(
+            file: badSource, title: "half", durationMs: 1_000,
+            folder: "F07", filename: "TEST.m4v"))
+
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: volume.appendingPathComponent(
+                "iPod_Control/Music/F07/TEST.m4v").path),
+            "a copy failure must not leave a media file behind")
+        XCTAssertEqual(try onDeviceDB, original)
+        XCTAssertTrue(backups.isEmpty, "no backup or DB write after a failed copy")
+    }
+
     // MARK: - remove
 
     func testAddThenRemoveRestoresFixtureAndDeletesFile() throws {

@@ -37,8 +37,7 @@ struct VideoProbe: Equatable {
               }),
               let videoCodec = video.codecName
         else { throw ProbeError.noVideoStream }
-        guard let text = raw.format?.duration, let duration = Double(text),
-              duration > 0
+        guard let duration = Self.duration(format: raw.format, videoStream: video)
         else { throw ProbeError.durationUnavailable }
 
         let audio = streams.first { $0.codecType == "audio" }
@@ -52,6 +51,32 @@ struct VideoProbe: Equatable {
             title: raw.format?.tags?["title"])
     }
 
+    /// Duration in seconds, or nil when no source reports one. Preferred is
+    /// the container's own `format.duration`; unfinalized or piped
+    /// WebM/Matroska omits it but still carries a per-stream `duration`
+    /// (float seconds) or a `DURATION` tag (`HH:MM:SS.fraction`) — either
+    /// lets progress compute, and such files convert fine, so they must not
+    /// be rejected as durationUnavailable.
+    private static func duration(format: RawProbe.Format?,
+                                 videoStream: RawProbe.Stream) -> Double? {
+        if let text = format?.duration, let d = Double(text), d > 0 { return d }
+        if let text = videoStream.duration, let d = Double(text), d > 0 { return d }
+        // `DURATION` has no underscore, so convertFromSnakeCase leaves the
+        // tag key intact (unlike e.g. `major_brand` → `majorBrand`).
+        if let text = videoStream.tags?["DURATION"],
+           let d = parseHMS(text), d > 0 { return d }
+        return nil
+    }
+
+    /// "00:00:10.500000000" → 10.5 seconds; nil on any malformed field.
+    private static func parseHMS(_ text: String) -> Double? {
+        let parts = text.split(separator: ":")
+        guard parts.count == 3,
+              let h = Double(parts[0]), let m = Double(parts[1]),
+              let s = Double(parts[2]) else { return nil }
+        return h * 3600 + m * 60 + s
+    }
+
     private struct RawProbe: Decodable {
         struct Stream: Decodable {
             struct Disposition: Decodable {
@@ -62,6 +87,8 @@ struct VideoProbe: Equatable {
             var profile: String?
             var width: Int?
             var height: Int?
+            var duration: String?
+            var tags: [String: String]?
             var disposition: Disposition?
         }
         struct Format: Decodable {
