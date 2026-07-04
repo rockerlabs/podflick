@@ -10,7 +10,7 @@ PROVED the firmware accepts:
 
   * a title-mhod splice with 3 size-field bumps was accepted (2026-07-02);
   * a track that is absent from every mhod52 index, has album id 0 and
-    zeroed cross-refs is still listed in Videos and plays («День выборов»).
+    zeroed cross-refs is still listed in Videos and plays.
 
 So v3 never regenerates and never renumbers: to add a video it clones a
 proven-visible mhit/mhip byte pattern from the CURRENT database, swaps only
@@ -36,7 +36,7 @@ import time
 from pathlib import Path
 
 MAC_EPOCH = 2082844800
-BACKUP_DIR = Path('/Volumes/Samsung_T5/ffmpeg/device_backups')
+BACKUP_DIR = Path.home() / '.podflick' / 'device_backups'
 
 
 def r32(d, o): return struct.unpack_from('<I', d, o)[0]
