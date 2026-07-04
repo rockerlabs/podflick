@@ -53,6 +53,11 @@ final class AppState: NSObject, NSMenuDelegate {
         model.onItemFinished = { [weak self] item in
             self?.itemFinished(item)
         }
+        // Without a delegate opting in, macOS silently drops banners posted
+        // by the ACTIVE app — and during a quiet launch this app is active,
+        // so every completion notification landed in Notification Center
+        // without ever popping. willPresent below opts back in.
+        UNUserNotificationCenter.current().delegate = self
     }
 
     // MARK: - Lifecycle (called by AppDelegate)
@@ -247,5 +252,18 @@ final class AppState: NSObject, NSMenuDelegate {
         UNUserNotificationCenter.current()
             .add(UNNotificationRequest(identifier: UUID().uuidString,
                                        content: content, trigger: nil))
+    }
+}
+
+extension AppState: UNUserNotificationCenterDelegate {
+    /// Show banners even while this app is the active one (the default is to
+    /// suppress them, which hid every quiet-transfer completion).
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler:
+            @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
     }
 }
