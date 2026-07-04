@@ -351,7 +351,7 @@ private struct QueueSectionView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(model.queue) { item in
-                        QueueRowView(item: item)
+                        QueueRowView(item: item, deviceLabel: deviceLabel(for: item))
                     }
                 }
             }
@@ -359,10 +359,19 @@ private struct QueueSectionView: View {
         }
         .padding(12)
     }
+
+    /// The destination iPod for a queued item — shown only when more than
+    /// one device is connected, so a multi-iPod session can tell where each
+    /// upload is bound. Single-device sessions have no ambiguity to resolve.
+    private func deviceLabel(for item: SyncModel.QueueItem) -> String? {
+        guard model.devices.count > 1 else { return nil }
+        return model.device(for: item.targetVolume)?.name
+    }
 }
 
 private struct QueueRowView: View {
     let item: SyncModel.QueueItem
+    let deviceLabel: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -370,6 +379,11 @@ private struct QueueRowView: View {
                 Image(systemName: symbol)
                     .foregroundStyle(symbolColor)
                 Text(item.title)
+                if let deviceLabel {
+                    Text("→ \(deviceLabel)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Text(stageText)
                     .font(.caption)

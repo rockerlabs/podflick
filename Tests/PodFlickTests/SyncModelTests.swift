@@ -131,6 +131,52 @@ final class SyncModelTests: XCTestCase {
         XCTAssertTrue(model.queue.isEmpty)
     }
 
+    // MARK: - Queue targets the enqueue-time device (B.13)
+
+    /// The device is captured when the item is dropped; moving the picker
+    /// afterwards must not retarget an already-queued upload.
+    func testEnqueueCapturesTargetDeviceAndSelectionSwitchDoesNotMoveIt() throws {
+        try makeVolume("APOD")
+        try makeVolume("BPOD")
+        let model = makeModel()
+        let volA = try XCTUnwrap(model.devices.first { $0.name == "APOD" }?.volumeURL)
+        let volB = try XCTUnwrap(model.devices.first { $0.name == "BPOD" }?.volumeURL)
+
+        model.selectedVolume = volA
+        model.enqueue([volumesRoot.appendingPathComponent("clip.mp4")])
+        XCTAssertEqual(model.queue.first?.targetVolume, volA)
+
+        model.selectedVolume = volB
+        XCTAssertEqual(model.queue.first?.targetVolume, volA,
+                       "switching the picker must not redirect a queued item")
+    }
+
+    /// If the enqueue-time device is gone by the item's turn, it fails with a
+    /// clear message instead of diverting onto whatever is selected now (here
+    /// the selection has fallen back to the still-connected BPOD).
+    func testQueuedItemFailsWhenTargetDeviceIsGoneRatherThanRedirecting() async throws {
+        let volA = try makeVolume("APOD")
+        try makeVolume("BPOD")
+        let fakeTools = FFmpegTools(ffmpeg: URL(fileURLWithPath: "/bin/false"),
+                                    ffprobe: URL(fileURLWithPath: "/bin/false"))
+        let model = makeModel(tools: fakeTools)
+        model.selectedVolume = try XCTUnwrap(
+            model.devices.first { $0.name == "APOD" }?.volumeURL)
+
+        model.enqueue([volumesRoot.appendingPathComponent("clip.mp4")])
+        // APOD vanishes before the worker (still on this actor) can run; the
+        // selection falls back to BPOD.
+        try FileManager.default.removeItem(at: volA)
+        model.refreshDevices()
+        XCTAssertEqual(model.selectedDevice?.name, "BPOD")
+
+        await model.waitUntilQueueDrained()
+        guard case .failed(let message) = model.queue[0].stage else {
+            return XCTFail("expected failure, got \(model.queue[0].stage)")
+        }
+        XCTAssertTrue(message.contains("no longer connected"), message)
+    }
+
     // MARK: - Eject
 
     func testEjectUnmountsSelectedVolume() async throws {
