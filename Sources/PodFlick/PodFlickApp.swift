@@ -3,18 +3,13 @@ import SwiftUI
 @main
 struct PodFlickApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    // The one app-wide model; the background entry points (Finder service,
-    // podflick://) feed the same instance via AppDelegate → AppState. The
-    // menu-bar progress item is an AppKit NSStatusItem owned by AppState (a
-    // SwiftUI MenuBarExtra pegs the main thread in an image-render loop here).
-    @StateObject private var model = SyncModel.shared
 
     var body: some Scene {
-        // A single-instance Window (not a WindowGroup): reopening from the
-        // status item focuses the one window instead of spawning duplicates
-        // that would share the one SyncModel.
-        Window("PodFlick", id: "main") {
-            ContentView(model: model)
-        }
+        // The main window is created and owned by AppState (AppKit), NOT by a
+        // SwiftUI Window scene: a scene's window auto-opens at launch, so a
+        // quiet service/URL launch flashed it before it could be hidden.
+        // Owning the window means a background launch never creates one.
+        // Settings is the placeholder scene SwiftUI requires.
+        Settings { EmptyView() }
     }
 }
