@@ -75,8 +75,8 @@ final class ITunesDBWriterTests: XCTestCase {
         XCTAssertEqual(added.mediaType, 2)
         XCTAssertEqual(added.albumID, 0, "clone must not reference an album")
 
-        // The kind mhod is the donor's ("День выборов", album id 0), verbatim.
-        let donor = try XCTUnwrap(db.tracks.first { $0.title == "День выборов" })
+        // The kind mhod is the donor's ("Sample Video 4", album id 0), verbatim.
+        let donor = try XCTUnwrap(db.tracks.first { $0.title == "Sample Video 4" })
         XCTAssertEqual(writer.data.subdata(in: try XCTUnwrap(added.kindMhodRange)),
                        writer.data.subdata(in: try XCTUnwrap(donor.kindMhodRange)))
 
@@ -99,13 +99,13 @@ final class ITunesDBWriterTests: XCTestCase {
     // MARK: - (c) rename patch against the firmware-accepted fixture
 
     func testRenameRoundTripMatchesAcceptedFixture() throws {
-        // iTunesDB.four-videos is the DB the firmware accepted AFTER the
-        // on-device rename splice wrote the «День выборов» title mhod.
-        // Renaming away and back must land on those exact bytes.
+        // iTunesDB.four-videos is a firmware-accepted device DB (titles since
+        // neutralized to placeholders — see Fixtures.swift). Renaming a track
+        // away and back must land on those exact bytes.
         let original = try fixture("iTunesDB.four-videos")
         var writer = try ITunesDBWriter(original)
         let target = try XCTUnwrap(
-            writer.db.tracks.first { $0.title == "День выборов" })
+            writer.db.tracks.first { $0.title == "Sample Video 4" })
 
         try writer.rename(trackID: target.id, to: "Election Day (extended)")
         XCTAssertNotEqual(writer.data, original)
@@ -115,13 +115,13 @@ final class ITunesDBWriterTests: XCTestCase {
         XCTAssertEqual(renamed.path, target.path, "rename must not touch the path")
         XCTAssertEqual(writer.db.tracks.count, 4)
 
-        try writer.rename(trackID: target.id, to: "День выборов")
+        try writer.rename(trackID: target.id, to: "Sample Video 4")
         XCTAssertEqual(writer.data, original)
     }
 
     func testRenameRoundTripOnFinderWrittenTitle() throws {
-        // The single-video fixture's title mhod was written by Finder itself;
-        // a shrinking rename and the rename back must reproduce it exactly.
+        // The single-video fixture carries one title mhod (neutralized
+        // placeholder); a shrinking rename and the rename back reproduce it.
         let original = try fixture("iTunesDB.single-video")
         var writer = try ITunesDBWriter(original)
         let track = try XCTUnwrap(writer.db.tracks.first)
@@ -137,7 +137,8 @@ final class ITunesDBWriterTests: XCTestCase {
         // title whose UTF-16 byte length is not 4-aligned must produce an
         // EXACT-size mhod (0x18+16+len). The old `(…+3)&~3` rounding wrote
         // 2 trailing pad bytes and the firmware answered with empty menus;
-        // Finder itself writes unaligned totals (86, 118 in the fixtures).
+        // Finder itself writes unaligned totals (the 86-byte device-name
+        // mhods in the fixtures are unaligned).
         var writer = try ITunesDBWriter(try fixture("iTunesDB.four-videos"))
         let target = try XCTUnwrap(writer.db.tracks.first)
 

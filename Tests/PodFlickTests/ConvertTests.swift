@@ -169,8 +169,8 @@ final class ConvertTests: XCTestCase {
 
     func testTitleIsFilenameStem() {
         XCTAssertEqual(
-            IPodVideoConverter.title(for: URL(fileURLWithPath: "/x/Кин-дза-дза 1.mkv")),
-            "Кин-дза-дза 1")
+            IPodVideoConverter.title(for: URL(fileURLWithPath: "/x/Sample Movie 1.mkv")),
+            "Sample Movie 1")
     }
 
     func testTitleStripsControlCharactersAndWhitespace() {
