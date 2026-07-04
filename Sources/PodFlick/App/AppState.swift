@@ -117,6 +117,9 @@ final class AppState: NSObject, NSMenuDelegate {
         let menu = NSMenu()
         menu.delegate = self    // rebuilt from the live queue each time it opens
         item.menu = menu
+        // Force visibility: created during a cold/accessory launch, the item's
+        // isVisible defaults to false and it never renders otherwise.
+        item.isVisible = true
         statusItem = item
     }
 
