@@ -30,6 +30,11 @@ targets:
       properties:
         LSApplicationCategoryType: public.app-category.utilities
         NSHighResolutionCapable: true
+        # Launch as an agent (no Dock icon): a quiet service/URL launch must
+        # show NOTHING — the Dock tile otherwise flashes before AppState can
+        # switch to .accessory. A normal launch is promoted to .regular (Dock
+        # icon + window) in AppState.showMainWindow.
+        LSUIElement: true
         # Finder right-click "Transfer to iPod" (B.9). Delivered to the running
         # single instance, so every DB write still funnels through the one
         # DeviceWriteQueue actor. transferToIPod: is the ServiceProvider selector.
