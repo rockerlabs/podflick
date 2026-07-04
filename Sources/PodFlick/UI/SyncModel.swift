@@ -50,6 +50,28 @@ final class SyncModel: ObservableObject {
             if case .failed = self { return true }
             return self == .done
         }
+
+        /// One-line status shown in the queue row and the menu-bar item.
+        var label: String {
+            switch self {
+            case .waiting: return "Waiting"
+            case .probing: return "Analyzing…"
+            case .converting(let fraction): return "Converting \(Int(fraction * 100))%"
+            case .copying(let fraction): return "Copying \(Int(fraction * 100))%"
+            case .updatingDatabase: return "Updating iTunesDB…"
+            case .done: return "Done"
+            case .failed(let message): return message
+            }
+        }
+    }
+
+    /// Where an upload came from. Drops report progress in the window;
+    /// background transfers (Finder service / podflick:// URL) run with no
+    /// window, so they report via the menu-bar item and a completion
+    /// notification instead.
+    enum Origin {
+        case drop
+        case background
     }
 
     struct QueueItem: Identifiable, Equatable {
@@ -62,6 +84,7 @@ final class SyncModel: ObservableObject {
         /// queued upload to the other iPod. nil only if nothing was selected
         /// when it was enqueued — the item then fails at its turn.
         let targetVolume: URL?
+        let origin: Origin
         var stage: Stage = .waiting
     }
 
@@ -79,6 +102,17 @@ final class SyncModel: ObservableObject {
     @Published private(set) var ejectTask: Task<Void, Never>?
     /// Most recent remove/rename/prefs write; kept for the test hook below.
     private var deviceWriteTask: Task<Void, Never>?
+
+    /// The single app-wide model. The Finder service and the podflick:// URL
+    /// handler feed THIS instance's queue, so every DB write still funnels
+    /// through the one DeviceWriteQueue actor (the one-mutator invariant).
+    /// Tests build their own isolated instances instead of touching this.
+    static let shared = SyncModel()
+
+    /// Called on the main actor when a queued item reaches a terminal stage.
+    /// The app posts a completion notification for background transfers here;
+    /// drops show their result in the window and ignore it.
+    var onItemFinished: ((QueueItem) -> Void)?
 
     let tools: FFmpegTools?
     private let scanner: IPodDeviceScanner
@@ -167,11 +201,23 @@ final class SyncModel: ObservableObject {
 
     // MARK: - Upload queue
 
+    /// Files dropped on the window — progress shows in the queue list.
     func enqueue(_ urls: [URL]) {
+        enqueue(urls, origin: .drop)
+    }
+
+    /// Files handed in by the Finder service or a podflick:// URL — the same
+    /// queue and the same single-mutator write path, tagged so the app can
+    /// report them via the menu-bar item and a completion notification.
+    func enqueueBackground(_ urls: [URL]) {
+        enqueue(urls, origin: .background)
+    }
+
+    private func enqueue(_ urls: [URL], origin: Origin) {
         let target = selectedVolume
         let incoming = urls.filter(\.isFileURL).map {
             QueueItem(sourceURL: $0, title: IPodVideoConverter.title(for: $0),
-                      targetVolume: target)
+                      targetVolume: target, origin: origin)
         }
         guard !incoming.isEmpty else { return }
         queue.append(contentsOf: incoming)
@@ -286,6 +332,11 @@ final class SyncModel: ObservableObject {
               // final state to a stale "Copying 87%".
               !queue[index].stage.isFinished else { return }
         queue[index].stage = stage
+        // Fire once, the moment the item first reaches a terminal stage (the
+        // guard above blocks any later call): covers every exit path —
+        // success, conversion failure, and the early "no ffmpeg" / "device
+        // gone" guards — so a background transfer always gets its notification.
+        if stage.isFinished { onItemFinished?(queue[index]) }
     }
 
     // MARK: - Eject
