@@ -25,4 +25,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let files = urls.flatMap(URLScheme.transferURLs(from:))
         AppState.shared.handleTransferRequest(files)
     }
+
+    /// Keep the app alive when the window closes: it may be running a quiet
+    /// background transfer (windowless), and on a cold service/URL launch the
+    /// single Window scene would otherwise terminate the app the instant
+    /// AppState hides the auto-opened window.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
 }

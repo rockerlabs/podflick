@@ -9,25 +9,22 @@ import UserNotifications
 ///
 /// The queue, device targeting and the single-mutator DB write all live in
 /// `SyncModel.shared`; this type only owns the *presentation* of background
-/// transfers (activation policy, the menu-bar status item, notifications).
+/// transfers: activation policy, an AppKit `NSStatusItem` menu (SwiftUI's
+/// `MenuBarExtra` pegs the main thread in an image-render loop here), and
+/// completion notifications.
 ///
-/// NOTE: the quiet-launch handling (launch-phase classification, closing the
+/// NOTE: the quiet-launch handling (launch-phase classification, hiding the
 /// auto-opened window, activation policy) is macOS window-server behavior with
-/// no headless-testable surface — it must be verified by hand on a real Mac.
+/// no headless-testable surface — verify it by hand on a real Mac.
 @MainActor
-final class AppState: ObservableObject {
+final class AppState: NSObject, NSMenuDelegate {
     static let shared = AppState()
 
     private let model = SyncModel.shared
 
-    /// Drives the MenuBarExtra's `isInserted`. Mirrors background mode, so the
-    /// menu-bar item — the only way back to the app while it runs windowless —
-    /// stays available until the user opens the window or quits, even after the
-    /// queue has been cleared.
-    @Published var showsStatusItem = false
-
     /// True between a quiet (service/URL) launch and the user opening a window.
-    /// While set, the app runs as an `.accessory` (no Dock icon, no window).
+    /// While set, the app runs as an `.accessory` (no Dock icon, no window)
+    /// and shows the status item.
     private var isBackgroundMode = false
 
     /// True only during the launch runloop pass. A transfer request that
@@ -41,7 +38,15 @@ final class AppState: ObservableObject {
     /// plain windowed launch pays no permission cost or first-run prompt.
     private var didRequestNotificationAuth = false
 
-    private init() {
+    /// The menu-bar item, present only in background mode.
+    private var statusItem: NSStatusItem?
+
+    /// The window hidden on entering background mode, re-shown on exit. Hidden
+    /// (orderOut) rather than closed so SwiftUI keeps its scene bookkeeping.
+    private weak var hiddenWindow: NSWindow?
+
+    private override init() {
+        super.init()
         model.onItemFinished = { [weak self] item in
             self?.itemFinished(item)
         }
@@ -76,27 +81,73 @@ final class AppState: ObservableObject {
 
     // MARK: - Background mode
 
-    /// Go windowless: no Dock icon, and close the window the scene auto-opened
-    /// at launch so a quiet transfer really has none. Reopened cleanly via
-    /// `openWindow(id: "main")` from the menu-bar item.
+    /// Go windowless: no Dock icon, hide the window the scene auto-opened at
+    /// launch, and show the status item as the way back into the app.
     private func enterBackgroundMode() {
+        guard !isBackgroundMode else { return }
         isBackgroundMode = true
-        showsStatusItem = true
         NSApp.setActivationPolicy(.accessory)
         for window in NSApp.windows
         where window.canBecomeMain && window.styleMask.contains(.titled) {
-            window.close()
+            hiddenWindow = window
+            window.orderOut(nil)
         }
+        showStatusItem()
     }
 
-    /// Return to a normal windowed app. Called when the user picks "Open
-    /// PodFlick" from the menu-bar item (which also opens the window).
+    /// Return to a normal windowed app. Called from the status item's "Open
+    /// PodFlick".
     func exitBackgroundMode() {
+        guard isBackgroundMode else { return }
         isBackgroundMode = false
-        showsStatusItem = false
+        hideStatusItem()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        hiddenWindow?.makeKeyAndOrderFront(nil)
+        hiddenWindow = nil
     }
+
+    // MARK: - Status item
+
+    private func showStatusItem() {
+        guard statusItem == nil else { return }
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        item.button?.image = NSImage(systemSymbolName: "ipod",
+                                     accessibilityDescription: "PodFlick transfers")
+        let menu = NSMenu()
+        menu.delegate = self    // rebuilt from the live queue each time it opens
+        item.menu = menu
+        statusItem = item
+    }
+
+    private func hideStatusItem() {
+        if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
+        statusItem = nil
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let background = model.queue.filter { $0.origin == .background }
+        for item in background {
+            menu.addItem(withTitle: "\(item.title) — \(item.stage.label)",
+                         action: nil, keyEquivalent: "")
+        }
+        if !background.isEmpty { menu.addItem(.separator()) }
+        addItem(to: menu, "Open PodFlick", #selector(openMainWindow))
+        if background.contains(where: \.stage.isFinished) {
+            addItem(to: menu, "Clear finished", #selector(clearFinished))
+        }
+        menu.addItem(.separator())
+        addItem(to: menu, "Quit PodFlick", #selector(quit))
+    }
+
+    private func addItem(to menu: NSMenu, _ title: String, _ action: Selector) {
+        menu.addItem(withTitle: title, action: action, keyEquivalent: "").target = self
+    }
+
+    @objc private func openMainWindow() { exitBackgroundMode() }
+    @objc private func clearFinished() { model.clearFinished() }
+    @objc private func quit() { NSApp.terminate(nil) }
 
     // MARK: - Notifications
 
