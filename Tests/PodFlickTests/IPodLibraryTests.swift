@@ -50,7 +50,7 @@ final class IPodLibraryTests: XCTestCase {
     func testVideosListsFixtureTracks() throws {
         let videos = try library.videos()
         XCTAssertEqual(videos.count, 4)
-        let known = try XCTUnwrap(videos.first { $0.title == "День выборов" })
+        let known = try XCTUnwrap(videos.first { $0.title == "Sample Video 4" })
         XCTAssertTrue(known.ipodPath.hasPrefix(":iPod_Control:Music:"))
         XCTAssertGreaterThan(known.durationMs, 0)
         XCTAssertGreaterThan(known.fileSize, 0)
@@ -163,9 +163,9 @@ final class IPodLibraryTests: XCTestCase {
         let source = try makeSourceFile()
 
         XCTAssertThrowsError(try library.add(
-            file: source, title: "День выборов", durationMs: 1_000)) { error in
+            file: source, title: "Sample Video 4", durationMs: 1_000)) { error in
             XCTAssertEqual(error as? IPodLibrary.LibraryError,
-                           .duplicateTitle("День выборов"))
+                           .duplicateTitle("Sample Video 4"))
         }
         XCTAssertEqual(try onDeviceDB, original)
         XCTAssertTrue(backups.isEmpty)
@@ -259,7 +259,7 @@ final class IPodLibraryTests: XCTestCase {
 
     func testRenameUpdatesTitleAndBacksUp() throws {
         let target = try XCTUnwrap(
-            try library.videos().first { $0.title == "День выборов" })
+            try library.videos().first { $0.title == "Sample Video 4" })
 
         try library.rename(trackID: target.id, to: "Election Day")
 

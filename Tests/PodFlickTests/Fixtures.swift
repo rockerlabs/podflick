@@ -2,7 +2,11 @@ import Foundation
 @testable import PodFlick
 
 /// Loads a golden fixture: real, firmware-accepted databases captured from
-/// the operator's devices (see reference/fixtures/).
+/// the operator's devices (see reference/fixtures/). Track titles and the
+/// device name were neutralized to placeholders ("Sample Video N",
+/// "PodFlick reference iPod") before open-sourcing — titles via the proven
+/// rename splice, the device name via a same-length in-place edit — so the
+/// byte structure and firmware-acceptance are unchanged.
 func fixture(_ name: String) throws -> Data {
     // Tests/PodFlickTests/<this file> -> repo root -> reference/fixtures
     let root = URL(fileURLWithPath: #filePath)
