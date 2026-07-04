@@ -95,9 +95,14 @@ final class AppState: NSObject, NSMenuDelegate {
     // MARK: - Main window (AppKit-owned)
 
     /// Shows (creating on first use) the one main window and brings the app
-    /// forward as a regular windowed app.
+    /// forward as a regular windowed app (the app launches as an LSUIElement
+    /// agent; this is where a normal launch gains its Dock icon).
     func showMainWindow() {
         NSApp.setActivationPolicy(.regular)
+        // Ask for notification permission while the app is visibly frontmost —
+        // requested from a windowless accessory launch, the system prompt is
+        // easy to miss and an unanswered prompt drops every later banner.
+        requestNotificationAuthIfNeeded()
         if mainWindow == nil {
             let hosting = NSHostingController(rootView: ContentView(model: model))
             let window = NSWindow(contentViewController: hosting)
@@ -227,16 +232,20 @@ final class AppState: NSObject, NSMenuDelegate {
         }
     }
 
+    private func requestNotificationAuthIfNeeded() {
+        guard !didRequestNotificationAuth else { return }
+        didRequestNotificationAuth = true
+        UNUserNotificationCenter.current()
+            .requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
     private func notify(title: String, body: String) {
-        let center = UNUserNotificationCenter.current()
-        if !didRequestNotificationAuth {
-            didRequestNotificationAuth = true
-            center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
-        }
+        requestNotificationAuthIfNeeded()   // fallback for quiet-only usage
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-        center.add(UNNotificationRequest(identifier: UUID().uuidString,
-                                          content: content, trigger: nil))
+        UNUserNotificationCenter.current()
+            .add(UNNotificationRequest(identifier: UUID().uuidString,
+                                       content: content, trigger: nil))
     }
 }
