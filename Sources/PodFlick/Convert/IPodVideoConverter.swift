@@ -9,6 +9,10 @@ struct IPodVideoConverter {
     enum ConversionError: Error, Equatable {
         /// Non-zero exit; `detail` is the tail of the tool's stderr.
         case toolFailed(tool: String, status: Int32, detail: String)
+        /// The located ffmpeg lacks the libx264 encoder — some static/conda
+        /// builds omit it, and it only shows up as an opaque encoder error
+        /// deep in the run. Surfaced as its own case for an actionable hint.
+        case libx264Unavailable
     }
 
     let tools: FFmpegTools
@@ -61,8 +65,8 @@ struct IPodVideoConverter {
                 }
             }
             guard result.status == 0 else {
-                throw ConversionError.toolFailed(
-                    tool: "ffmpeg", status: result.status, detail: result.stderrTail)
+                throw Self.conversionError(status: result.status,
+                                           stderrTail: result.stderrTail)
             }
         } catch {
             try? FileManager.default.removeItem(at: output)
@@ -111,6 +115,17 @@ struct IPodVideoConverter {
             "-loglevel", "error",
             "-y", output.path,
         ]
+    }
+
+    /// Maps a non-zero ffmpeg exit into a `ConversionError`. A build without
+    /// the libx264 encoder fails with `Unknown encoder 'libx264'` — promote
+    /// that to `.libx264Unavailable` so the UI can point the user at a real
+    /// fix rather than dumping the raw stderr tail.
+    static func conversionError(status: Int32, stderrTail: String) -> ConversionError {
+        if stderrTail.contains("Unknown encoder 'libx264'") {
+            return .libx264Unavailable
+        }
+        return .toolFailed(tool: "ffmpeg", status: status, detail: stderrTail)
     }
 
     /// Filename stem → a clean UTF-8 title: control characters stripped,
@@ -175,18 +190,29 @@ struct IPodVideoConverter {
         try process.run()
 
         return try await withTaskCancellationHandler {
-            async let stderrText = collectText(stderr.fileHandleForReading)
-            for try await line in stdout.fileHandleForReading.bytes.lines {
-                onLine(line)
+            do {
+                async let stderrText = collectText(stderr.fileHandleForReading)
+                for try await line in stdout.fileHandleForReading.bytes.lines {
+                    onLine(line)
+                }
+                // AsyncBytes completes an in-flight read at EOF without
+                // throwing, so a cancel that already SIGTERMed the child would
+                // otherwise surface as toolFailed(status: 15) instead of
+                // CancellationError.
+                try Task.checkCancellation()
+                let tail = String((try await stderrText).suffix(2000))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let status = await exitCodes.first { _ in true } ?? -1
+                return (status, tail)
+            } catch {
+                // A throw here (read error, an `onLine` that throws, or the
+                // checkCancellation above) leaves the child running until it
+                // happens to die on SIGPIPE — terminate it now so it is
+                // always reaped. onCancel covers the cancellation path; this
+                // covers every other throw.
+                process.terminate()
+                throw error
             }
-            // AsyncBytes completes an in-flight read at EOF without throwing,
-            // so a cancel that already SIGTERMed the child would otherwise
-            // surface as toolFailed(status: 15) instead of CancellationError.
-            try Task.checkCancellation()
-            let tail = String((try await stderrText).suffix(2000))
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let status = await exitCodes.first { _ in true } ?? -1
-            return (status, tail)
         } onCancel: {
             process.terminate()
         }
