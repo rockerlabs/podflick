@@ -443,11 +443,15 @@ private struct PipelineStepper: View {
         .frame(height: 16)
     }
 
-    /// The connector leaving step `i`: full once that step is done, filling
-    /// with the fine fraction while it is the active one, empty ahead.
+    /// The connector between step `i` and `i+1` visualizes step `i+1`'s work,
+    /// so both the convert and the copy phases fill their own segment: full
+    /// once that step is done, filling with its fine progress while active,
+    /// empty before it starts. The active step that reports no fraction (the
+    /// brief DB-write tail of Copy) reads as full.
     private func fillOfConnector(after i: Int) -> Double {
-        if i < activeStep { return 1 }
-        if i == activeStep { return fraction ?? 0 }
+        let phase = i + 1
+        if activeStep > phase { return 1 }
+        if activeStep == phase { return fraction ?? 1 }
         return 0
     }
 
