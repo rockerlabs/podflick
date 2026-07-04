@@ -56,6 +56,12 @@ final class SyncModel: ObservableObject {
         let id = UUID()
         let sourceURL: URL
         var title: String
+        /// The device this item was dropped on, captured at enqueue time.
+        /// `process` targets THIS volume, not the live selection, so
+        /// switching the device picker mid-batch can't silently redirect a
+        /// queued upload to the other iPod. nil only if nothing was selected
+        /// when it was enqueued — the item then fails at its turn.
+        let targetVolume: URL?
         var stage: Stage = .waiting
     }
 
@@ -82,9 +88,15 @@ final class SyncModel: ObservableObject {
 
     var isEjecting: Bool { ejectTask != nil }
 
-    var selectedDevice: IPodDevice? {
-        devices.first { $0.volumeURL == selectedVolume }
+    /// The connected device backing `volume`, or nil if none matches (the
+    /// volume was ejected, or `volume` is nil). The one lookup shared by the
+    /// live selection, per-item queue targeting, and the queue UI label.
+    func device(for volume: URL?) -> IPodDevice? {
+        guard let volume else { return nil }
+        return devices.first { $0.volumeURL == volume }
     }
+
+    var selectedDevice: IPodDevice? { device(for: selectedVolume) }
 
     /// Uploads need all three: the tools, a supported device, and an
     /// existing DB (donor-clone splicing cannot start from an empty one —
@@ -156,8 +168,10 @@ final class SyncModel: ObservableObject {
     // MARK: - Upload queue
 
     func enqueue(_ urls: [URL]) {
+        let target = selectedVolume
         let incoming = urls.filter(\.isFileURL).map {
-            QueueItem(sourceURL: $0, title: IPodVideoConverter.title(for: $0))
+            QueueItem(sourceURL: $0, title: IPodVideoConverter.title(for: $0),
+                      targetVolume: target)
         }
         guard !incoming.isEmpty else { return }
         queue.append(contentsOf: incoming)
@@ -201,9 +215,13 @@ final class SyncModel: ObservableObject {
             set(.failed("ffmpeg not found — install it (brew install ffmpeg) and relaunch"))
             return
         }
-        guard let device = selectedDevice, device.isSupported,
-              device.databaseExists else {
-            set(.failed("no writable iPod connected"))
+        // Resolve the enqueue-time target against the current fleet, NOT the
+        // live selection: the picker may have moved on to another iPod since
+        // the drop. If that device is gone (or lost its DB) we fail the item
+        // rather than divert it onto whatever is selected now.
+        guard let device = device(for: item.targetVolume),
+              device.isSupported, device.databaseExists else {
+            set(.failed("the iPod this upload was queued for is no longer connected"))
             return
         }
 
@@ -318,8 +336,9 @@ final class SyncModel: ObservableObject {
 
     /// Persists the conversion profile for the SELECTED device (on the
     /// device itself, so it follows the hardware). Applies to conversions
-    /// started after the change; already-queued items pick it up because
-    /// `process` re-reads the device per item.
+    /// started after the change; a queued item still picks it up when its
+    /// turn comes, because `process` re-resolves its target device from the
+    /// live list per item (and this write refreshes that snapshot).
     /// No equality guard against the device snapshot: it goes stale while
     /// a write is in flight and would silently drop a quick second toggle.
     /// The write is idempotent and serialized by the queue anyway.
