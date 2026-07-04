@@ -304,7 +304,8 @@ final class ConvertTests: XCTestCase {
         try makeExecutable(binA.appendingPathComponent("ffmpeg"))
         try makeExecutable(binB.appendingPathComponent("ffprobe"))
 
-        let tools = FFmpegTools.locate(searchPATH: "\(binA.path):\(binB.path)",
+        let tools = FFmpegTools.locate(bundled: nil,
+                                       searchPATH: "\(binA.path):\(binB.path)",
                                        fallbacks: [])
         XCTAssertEqual(tools?.ffmpeg.path, binA.appendingPathComponent("ffmpeg").path)
         XCTAssertEqual(tools?.ffprobe.path, binB.appendingPathComponent("ffprobe").path)
@@ -316,7 +317,42 @@ final class ConvertTests: XCTestCase {
         try makeExecutable(root.appendingPathComponent("ffmpeg"))
         // ffprobe missing → the pair is unusable. Empty fallbacks keep the
         // machine's real install out of the search.
-        XCTAssertNil(FFmpegTools.locate(searchPATH: root.path, fallbacks: []))
+        XCTAssertNil(FFmpegTools.locate(bundled: nil, searchPATH: root.path, fallbacks: []))
+    }
+
+    func testLocatePrefersBundledOverPATH() throws {
+        let root = try makeTempDirectory(prefix: "PodFlickTools")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bundled = root.appendingPathComponent("bundled")
+        let path = root.appendingPathComponent("path")
+        try FileManager.default.createDirectory(at: bundled, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: path, withIntermediateDirectories: true)
+        // Both locations hold a full pair; the bundled copy must win.
+        try makeExecutable(bundled.appendingPathComponent("ffmpeg"))
+        try makeExecutable(bundled.appendingPathComponent("ffprobe"))
+        try makeExecutable(path.appendingPathComponent("ffmpeg"))
+        try makeExecutable(path.appendingPathComponent("ffprobe"))
+
+        let tools = FFmpegTools.locate(bundled: bundled.path,
+                                       searchPATH: path.path,
+                                       fallbacks: [])
+        XCTAssertEqual(tools?.ffmpeg.path, bundled.appendingPathComponent("ffmpeg").path)
+        XCTAssertEqual(tools?.ffprobe.path, bundled.appendingPathComponent("ffprobe").path)
+    }
+
+    func testLocateFallsBackToPATHWhenBundledMissing() throws {
+        let root = try makeTempDirectory(prefix: "PodFlickTools")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let path = root.appendingPathComponent("path")
+        try FileManager.default.createDirectory(at: path, withIntermediateDirectories: true)
+        try makeExecutable(path.appendingPathComponent("ffmpeg"))
+        try makeExecutable(path.appendingPathComponent("ffprobe"))
+
+        // Bundled dir points at a nonexistent path → lookup falls through to PATH.
+        let tools = FFmpegTools.locate(bundled: root.appendingPathComponent("absent").path,
+                                       searchPATH: path.path,
+                                       fallbacks: [])
+        XCTAssertEqual(tools?.ffmpeg.path, path.appendingPathComponent("ffmpeg").path)
     }
 
     private func makeExecutable(_ url: URL) throws {
