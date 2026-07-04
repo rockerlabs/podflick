@@ -80,6 +80,33 @@ final class SyncPipelineIntegrationTests: XCTestCase {
         XCTAssertEqual(model.deviceVideos.count, 4)
     }
 
+    /// B.13: an upload lands on the iPod it was dropped on, even if the
+    /// device picker moves to a second iPod before the convert finishes.
+    func testMidQueueDeviceSwitchKeepsUploadOnEnqueueTimeDevice() async throws {
+        let ipod1 = volumesRoot.appendingPathComponent("IPOD")
+        let ipod2 = volumesRoot.appendingPathComponent("IPOD2")
+        try install(database: try fixture("iTunesDB.four-videos"), onVolume: ipod2)
+        model.refreshDevices()
+        model.selectedVolume = try XCTUnwrap(
+            model.devices.first { $0.name == "IPOD" }?.volumeURL)
+
+        let clip = try makeTestClip(
+            tools: tools, at: volumesRoot.appendingPathComponent("Switcheroo.mp4"))
+        model.enqueue([clip])
+        // Move the picker to the other iPod synchronously — the worker Task
+        // can't run until we suspend, so it reads a target already switched
+        // away from, exercising the redirect the capture must prevent.
+        model.selectedVolume = try XCTUnwrap(
+            model.devices.first { $0.name == "IPOD2" }?.volumeURL)
+        await model.waitUntilQueueDrained()
+
+        XCTAssertEqual(model.queue.map(\.stage), [.done])
+        XCTAssertEqual(try IPodLibrary(volumeURL: ipod1).videos().count, 5,
+                       "the drop's own device gained the track")
+        XCTAssertEqual(try IPodLibrary(volumeURL: ipod2).videos().count, 4,
+                       "the switched-to device was left untouched")
+    }
+
     func testTwoDropsProcessSeriallyBothLand() async throws {
         let first = try makeTestClip(
             tools: tools, at: volumesRoot.appendingPathComponent("First.mp4"))
