@@ -55,7 +55,8 @@ struct IPodVideoConverter {
             let result = try await Self.run(
                 tools.ffmpeg,
                 arguments: Self.conversionArguments(input: input, output: output,
-                                                    title: title, profile: profile)
+                                                    title: title, profile: profile,
+                                                    sourceFrameRate: probe.frameRate)
             ) { line in
                 parser.consume(line: line)
                 let fraction = parser.fraction(ofTotal: probe.durationSeconds)
@@ -76,9 +77,11 @@ struct IPodVideoConverter {
     }
 
     /// The full ffmpeg invocation for one file. Pure, so tests can pin it
-    /// against the proven recipe.
+    /// against the proven recipe. `sourceFrameRate` is the probe's raw
+    /// `avg_frame_rate` string; see `frameRateArgument` for how it shapes `-r`.
     static func conversionArguments(input: URL, output: URL, title: String,
-                                    profile: VideoProfile = .standard) -> [String] {
+                                    profile: VideoProfile = .standard,
+                                    sourceFrameRate: String? = nil) -> [String] {
         [
             "-i", input.path,
             // Legacy sources carry pre-UTF-8 tags (a Windows-1251 ©nam gave
@@ -102,7 +105,11 @@ struct IPodVideoConverter {
             "-b:v", profile.videoBitrate,
             "-maxrate", profile.videoMaxrate,
             "-bufsize", profile.videoBufsize,
-            "-r", "30",
+            // The firmware caps playback at 30fps. A ≤30fps source is passed
+            // through at its native cadence; forcing `-r 30` on a 24/25fps
+            // source inserted duplicate frames on a fixed cadence (25→30
+            // doubles every 5th frame) → pan judder (B.4.1a).
+            "-r", frameRateArgument(source: sourceFrameRate),
             "-c:a", "aac",
             "-b:a", "128k",
             "-ar", "44100",
@@ -115,6 +122,29 @@ struct IPodVideoConverter {
             "-loglevel", "error",
             "-y", output.path,
         ]
+    }
+
+    /// The value for ffmpeg's `-r` given the source's raw `avg_frame_rate`
+    /// string. A known rate in (0, 30] is returned verbatim so the output
+    /// keeps the source's exact cadence (no resampling); anything above 30,
+    /// unknown ("0/0"), or unparseable falls back to "30" — the firmware's
+    /// playback ceiling and the safe default.
+    static func frameRateArgument(source: String?) -> String {
+        guard let source, let fps = evaluateFraction(source), fps > 0, fps <= 30
+        else { return "30" }
+        return source
+    }
+
+    /// Evaluates an ffprobe rational string ("30000/1001", "25/1") or a plain
+    /// decimal to a Double; nil on a malformed field or a zero denominator.
+    static func evaluateFraction(_ text: String) -> Double? {
+        let parts = text.split(separator: "/", maxSplits: 1)
+        if parts.count == 2 {
+            guard let n = Double(parts[0]), let d = Double(parts[1]), d != 0
+            else { return nil }
+            return n / d
+        }
+        return Double(text)
     }
 
     /// Maps a non-zero ffmpeg exit into a `ConversionError`. A build without

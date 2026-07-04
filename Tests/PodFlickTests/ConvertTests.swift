@@ -11,7 +11,8 @@ final class ConvertTests: XCTestCase {
     /// B.5.1 smoke (320×240 L1.3 ≤768 kbps — the 5G decoder limit; the
     /// 640×480 L3.0 reference recipe played black). A drift here is a
     /// firmware-facing change and needs a real-device re-proof before it
-    /// lands.
+    /// lands. With no source frame rate this exercises the unknown-rate
+    /// default: `-r 30`, the firmware ceiling (B.4.1a).
     func testConversionArgumentsMatchProvenRecipe() {
         let arguments = IPodVideoConverter.conversionArguments(
             input: URL(fileURLWithPath: "/in/movie.mkv"),
@@ -82,6 +83,54 @@ final class ConvertTests: XCTestCase {
                                                    title: "Movie", profile: .standard))
     }
 
+    // MARK: - Frame rate
+
+    /// A ≤30fps source is passed through at its exact native cadence — the
+    /// whole point of B.4.1a. Forcing `-r 30` on 24/25fps duplicated every
+    /// 5th/6th frame (pan judder).
+    func testConversionArgumentsPassThroughSubThirtyFrameRate() {
+        for rate in ["24/1", "25/1", "30000/1001", "30/1"] {
+            let arguments = IPodVideoConverter.conversionArguments(
+                input: URL(fileURLWithPath: "/in/movie.mkv"),
+                output: URL(fileURLWithPath: "/out/movie.m4v"),
+                title: "Movie", sourceFrameRate: rate)
+            let r = arguments.firstIndex(of: "-r")!
+            XCTAssertEqual(arguments[r + 1], rate, "expected native cadence for \(rate)")
+        }
+    }
+
+    /// A >30fps source is capped at the firmware ceiling; unknown/unparseable
+    /// rates fall back to the same safe default.
+    func testConversionArgumentsCapAboveThirtyFrameRate() {
+        for rate in ["60/1", "50/1", "60000/1001", "0/0", "N/A", ""] {
+            let arguments = IPodVideoConverter.conversionArguments(
+                input: URL(fileURLWithPath: "/in/movie.mkv"),
+                output: URL(fileURLWithPath: "/out/movie.m4v"),
+                title: "Movie", sourceFrameRate: rate)
+            let r = arguments.firstIndex(of: "-r")!
+            XCTAssertEqual(arguments[r + 1], "30", "expected 30fps cap for \(rate)")
+        }
+    }
+
+    func testFrameRateArgumentBoundary() {
+        // 30000/1001 ≈ 29.97 stays; 60000/1001 ≈ 59.94 caps.
+        XCTAssertEqual(IPodVideoConverter.frameRateArgument(source: "30000/1001"),
+                       "30000/1001")
+        XCTAssertEqual(IPodVideoConverter.frameRateArgument(source: "60000/1001"), "30")
+        // nil (no probe rate) and a zero denominator both fall back.
+        XCTAssertEqual(IPodVideoConverter.frameRateArgument(source: nil), "30")
+        XCTAssertEqual(IPodVideoConverter.frameRateArgument(source: "25/0"), "30")
+    }
+
+    func testEvaluateFraction() {
+        XCTAssertEqual(IPodVideoConverter.evaluateFraction("30000/1001")!,
+                       29.97, accuracy: 0.01)
+        XCTAssertEqual(IPodVideoConverter.evaluateFraction("25/1"), 25)
+        XCTAssertEqual(IPodVideoConverter.evaluateFraction("23.976"), 23.976)
+        XCTAssertNil(IPodVideoConverter.evaluateFraction("30/0"))
+        XCTAssertNil(IPodVideoConverter.evaluateFraction("N/A"))
+    }
+
     // MARK: - Progress parsing
 
     func testProgressParserReadsMicroseconds() {
@@ -142,7 +191,8 @@ final class ConvertTests: XCTestCase {
         {
           "streams": [
             {"codec_type": "video", "codec_name": "h264",
-             "profile": "Constrained Baseline", "width": 640, "height": 480},
+             "profile": "Constrained Baseline", "width": 640, "height": 480,
+             "avg_frame_rate": "30000/1001"},
             {"codec_type": "audio", "codec_name": "aac"}
           ],
           "format": {"duration": "90.500000", "tags": {"title": "Old Title"}}
@@ -157,6 +207,7 @@ final class ConvertTests: XCTestCase {
             videoProfile: "Constrained Baseline",
             width: 640,
             height: 480,
+            frameRate: "30000/1001",
             audioCodec: "aac",
             title: "Old Title"))
     }

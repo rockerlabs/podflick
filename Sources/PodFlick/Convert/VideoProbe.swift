@@ -18,6 +18,12 @@ struct VideoProbe: Equatable {
     var videoProfile: String? = nil
     var width: Int? = nil
     var height: Int? = nil
+    /// Source frame rate as ffprobe's raw `avg_frame_rate` rational string
+    /// (e.g. "30000/1001", "25/1"), or nil when the stream reports none.
+    /// Kept verbatim so the converter can pass a ≤30fps source through at its
+    /// exact native cadence rather than resampling it (see
+    /// `IPodVideoConverter.frameRateArgument`).
+    var frameRate: String? = nil
     var audioCodec: String? = nil
     var title: String? = nil
 
@@ -47,6 +53,7 @@ struct VideoProbe: Equatable {
             videoProfile: video.profile,
             width: video.width,
             height: video.height,
+            frameRate: video.avgFrameRate,
             audioCodec: audio?.codecName,
             title: raw.format?.tags?["title"])
     }
@@ -87,6 +94,7 @@ struct VideoProbe: Equatable {
             var profile: String?
             var width: Int?
             var height: Int?
+            var avgFrameRate: String?
             var duration: String?
             var tags: [String: String]?
             var disposition: Disposition?
