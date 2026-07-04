@@ -118,6 +118,18 @@ final class SyncModelTests: XCTestCase {
         XCTAssertTrue(model.queue.isEmpty)
     }
 
+    /// Drops and background (service/URL) transfers share the one queue but
+    /// carry their origin so the app knows where to report progress (B.9).
+    func testEnqueueTagsOriginDropVsBackground() throws {
+        try makeVolume("IPOD")
+        let model = makeModel(tools: nil)
+
+        model.enqueue([volumesRoot.appendingPathComponent("a.mp4")])
+        model.enqueueBackground([volumesRoot.appendingPathComponent("b.mp4")])
+
+        XCTAssertEqual(model.queue.map(\.origin), [.drop, .background])
+    }
+
     func testClearFinishedKeepsPendingItems() async throws {
         try makeVolume("IPOD")
         let model = makeModel(tools: nil)

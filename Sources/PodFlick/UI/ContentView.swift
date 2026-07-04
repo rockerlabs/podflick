@@ -3,7 +3,7 @@ import SwiftUI
 /// Main window: device header, upload queue, and the on-device video list.
 /// Dropping files anywhere in the window enqueues them.
 struct ContentView: View {
-    @StateObject private var model = SyncModel()
+    @ObservedObject var model: SyncModel
     @State private var isDropTargeted = false
     @State private var videoToRename: IPodLibrary.Video?
     @State private var renameTitle = ""
@@ -385,7 +385,7 @@ private struct QueueRowView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text(stageText)
+                Text(item.stage.label)
                     .font(.caption)
                     .foregroundStyle(stageIsFailure ? .red : .secondary)
             }
@@ -405,18 +405,6 @@ private struct QueueRowView: View {
         switch item.stage {
         case .converting(let fraction), .copying(let fraction): return fraction
         default: return nil
-        }
-    }
-
-    private var stageText: String {
-        switch item.stage {
-        case .waiting: return "Waiting"
-        case .probing: return "Analyzing…"
-        case .converting(let fraction): return "Converting \(Int(fraction * 100))%"
-        case .copying(let fraction): return "Copying \(Int(fraction * 100))%"
-        case .updatingDatabase: return "Updating iTunesDB…"
-        case .done: return "Done"
-        case .failed(let message): return message
         }
     }
 
@@ -512,5 +500,5 @@ enum Formatters {
 }
 
 #Preview {
-    ContentView()
+    ContentView(model: SyncModel(observeVolumeMounts: false))
 }
