@@ -53,3 +53,18 @@ notification.
 > macOS registers the service.
 
 Full hardware smoke steps: [docs/smoke-service-transfer.md](docs/smoke-service-transfer.md).
+
+## License
+
+PodFlick is released under the [MIT License](LICENSE).
+
+It does **not** bundle ffmpeg — it shells out to an ffmpeg/ffprobe you install
+yourself (`brew install ffmpeg`), so ffmpeg's own license (GPL/LGPL depending
+on the build) stays with your copy of ffmpeg and does not extend to PodFlick.
+
+The iTunesDB read/write layer is an independent, byte-level reverse engineering
+of the on-device format (see [docs/itunesdb-format.md](docs/itunesdb-format.md));
+no third-party database library is used or derived from.
+
+"iPod" and "iTunes" are trademarks of Apple Inc. PodFlick is an independent
+project, not affiliated with or endorsed by Apple.
