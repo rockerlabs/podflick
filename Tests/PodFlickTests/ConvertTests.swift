@@ -196,6 +196,49 @@ final class ConvertTests: XCTestCase {
         }
     }
 
+    func testProbeFallsBackToStreamDuration() throws {
+        // Unfinalized/piped WebM omits format.duration but the video stream
+        // still reports one — the file converts fine, so it must be accepted.
+        let json = Data("""
+            {"streams": [{"codec_type": "video", "codec_name": "vp9",
+                          "duration": "42.0"}],
+             "format": {}}
+            """.utf8)
+        let probe = try VideoProbe.decode(ffprobeJSON: json)
+        XCTAssertEqual(probe.durationSeconds, 42.0)
+        XCTAssertEqual(probe.videoCodec, "vp9")
+    }
+
+    func testProbeFallsBackToStreamDurationTag() throws {
+        // Last resort: the Matroska/WebM per-track DURATION tag
+        // (HH:MM:SS.fraction), present even when both duration fields are not.
+        let json = Data("""
+            {"streams": [{"codec_type": "video", "codec_name": "vp9",
+                          "tags": {"DURATION": "00:01:30.500000000"}}],
+             "format": {}}
+            """.utf8)
+        let probe = try VideoProbe.decode(ffprobeJSON: json)
+        XCTAssertEqual(probe.durationSeconds, 90.5)
+    }
+
+    // MARK: - Error mapping
+
+    func testConversionErrorPromotesMissingLibx264() {
+        // A static/conda ffmpeg without libx264 fails deep in the run — the
+        // opaque "Unknown encoder" tail becomes an actionable case.
+        XCTAssertEqual(
+            IPodVideoConverter.conversionError(
+                status: 234, stderrTail: "Unknown encoder 'libx264'\n"),
+            .libx264Unavailable)
+    }
+
+    func testConversionErrorKeepsGenericToolFailure() {
+        XCTAssertEqual(
+            IPodVideoConverter.conversionError(
+                status: 1, stderrTail: "moov atom not found"),
+            .toolFailed(tool: "ffmpeg", status: 1, detail: "moov atom not found"))
+    }
+
     // MARK: - Tool lookup
 
     func testLocateFindsBothToolsAcrossDirectories() throws {
