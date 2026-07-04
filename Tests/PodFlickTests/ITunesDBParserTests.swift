@@ -14,12 +14,12 @@ final class ITunesDBParserTests: XCTestCase {
         // Section table in Finder's canonical order: albums, tracks,
         // playlists ×2, smart playlists — with sizes covering the file.
         XCTAssertEqual(db.sections.map(\.type), [4, 1, 3, 2, 5])
-        XCTAssertEqual(db.sections.map(\.totalSize).reduce(0xF4, +), 15812)
+        XCTAssertEqual(db.sections.map(\.totalSize).reduce(0xF4, +), 15804)
 
         XCTAssertEqual(db.tracks.count, 1)
         let track = try XCTUnwrap(db.tracks.first)
         XCTAssertEqual(track.id, 126017)
-        XCTAssertEqual(track.title, "Кин-дза-дза_ipod5g")
+        XCTAssertEqual(track.title, "Sample Video 1")
         XCTAssertEqual(track.path, ":iPod_Control:Music:F16:JHBI.m4v")
         XCTAssertEqual(track.fileSize, 797639938)
         XCTAssertEqual(track.durationMs, 7642567)
@@ -61,10 +61,10 @@ final class ITunesDBParserTests: XCTestCase {
         XCTAssertEqual(db.tracks.count, 4)
         XCTAssertEqual(db.tracks.map(\.id), [31, 48, 62, 68])
         XCTAssertEqual(db.tracks.map(\.title), [
-            "Кин-дза-дза_ipod5g",
-            "The Big Lebowski 1998 (Rus(Goblin)/Eng)",
-            "Хороший, плохой, злой_ipod",
-            "День выборов",
+            "Sample Video 1",
+            "Sample Video 2",
+            "Sample Video 3",
+            "Sample Video 4",
         ])
         XCTAssertTrue(db.tracks.allSatisfy { $0.mediaType == 2 })
 
