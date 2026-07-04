@@ -9,10 +9,12 @@ struct IPodVideoConverter {
     enum ConversionError: Error, Equatable {
         /// Non-zero exit; `detail` is the tail of the tool's stderr.
         case toolFailed(tool: String, status: Int32, detail: String)
-        /// The located ffmpeg lacks the libx264 encoder — some static/conda
-        /// builds omit it, and it only shows up as an opaque encoder error
-        /// deep in the run. Surfaced as its own case for an actionable hint.
-        case libx264Unavailable
+        /// The located ffmpeg was built without the VideoToolbox encoder —
+        /// unusual on macOS (Homebrew ships it, and it is an Apple system
+        /// framework) but possible with a misconfigured or non-macOS build,
+        /// and it only shows up as an opaque encoder error deep in the run.
+        /// Surfaced as its own case for an actionable hint.
+        case videoToolboxUnavailable
     }
 
     let tools: FFmpegTools
@@ -95,7 +97,15 @@ struct IPodVideoConverter {
             // default (≤320×240, baseline ≤L1.3, ≤768 kbps — proven in the
             // B.5.1 smoke) or the opt-in 5.5G envelope (≤640×480, ≤L3.0,
             // ≤1.5 Mbps — decodes BLACK on a real 5G).
-            "-c:v", "libx264",
+            //
+            // Encoder: Apple's h264_videotoolbox (B.15.1) rather than libx264
+            // (GPL) so a bundled ffmpeg stays LGPL-only. VideoToolbox honours
+            // `-profile:v baseline`/`-level` strictly — a headless probe of
+            // both profiles confirms the muxed stream reports Baseline L1.3 /
+            // L3.0, not a silently-upgraded Main. Re-proven on real hardware
+            // (2026-07-05): 5G plays .standard; 5.5G plays both profiles —
+            // identical behaviour to the libx264 output it replaces.
+            "-c:v", "h264_videotoolbox",
             "-profile:v", "baseline",
             "-level", profile.h264Level,
             "-pix_fmt", "yuv420p",
@@ -148,12 +158,13 @@ struct IPodVideoConverter {
     }
 
     /// Maps a non-zero ffmpeg exit into a `ConversionError`. A build without
-    /// the libx264 encoder fails with `Unknown encoder 'libx264'` — promote
-    /// that to `.libx264Unavailable` so the UI can point the user at a real
-    /// fix rather than dumping the raw stderr tail.
+    /// the VideoToolbox encoder fails with `Unknown encoder
+    /// 'h264_videotoolbox'` — promote that to `.videoToolboxUnavailable` so
+    /// the UI can point the user at a real fix rather than dumping the raw
+    /// stderr tail.
     static func conversionError(status: Int32, stderrTail: String) -> ConversionError {
-        if stderrTail.contains("Unknown encoder 'libx264'") {
-            return .libx264Unavailable
+        if stderrTail.contains("Unknown encoder 'h264_videotoolbox'") {
+            return .videoToolboxUnavailable
         }
         return .toolFailed(tool: "ffmpeg", status: status, detail: stderrTail)
     }

@@ -492,8 +492,8 @@ final class SyncModel: ObservableObject {
             return "no video stream — this is not a video file"
         case VideoProbe.ProbeError.durationUnavailable:
             return "the file reports no duration — re-mux it first"
-        case IPodVideoConverter.ConversionError.libx264Unavailable:
-            return "your ffmpeg has no libx264 encoder — reinstall it "
+        case IPodVideoConverter.ConversionError.videoToolboxUnavailable:
+            return "your ffmpeg was built without VideoToolbox — reinstall it "
                  + "(brew install ffmpeg)"
         case IPodVideoConverter.ConversionError.toolFailed(let tool, let status, let detail):
             let tail = detail.isEmpty ? "" : ": \(detail.suffix(300))"

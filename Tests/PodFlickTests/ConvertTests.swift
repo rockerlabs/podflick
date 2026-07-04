@@ -7,12 +7,14 @@ final class ConvertTests: XCTestCase {
 
     // MARK: - Conversion arguments
 
-    /// Pins the invocation to the recipe proven on the real 5G during the
-    /// B.5.1 smoke (320×240 L1.3 ≤768 kbps — the 5G decoder limit; the
-    /// 640×480 L3.0 reference recipe played black). A drift here is a
-    /// firmware-facing change and needs a real-device re-proof before it
-    /// lands. With no source frame rate this exercises the unknown-rate
-    /// default: `-r 30`, the firmware ceiling (B.4.1a).
+    /// Pins the invocation. The 320×240 L1.3 ≤768 kbps envelope is the 5G
+    /// decoder limit proven on the real 5G in the B.5.1 smoke (the 640×480
+    /// L3.0 reference recipe played black). The encoder is Apple's
+    /// h264_videotoolbox (B.15.1, was libx264): a headless probe confirms it
+    /// emits Baseline L1.3, and a real-device re-proof (2026-07-05) plays on
+    /// 5G + 5.5G, matching the libx264 output. A drift here is a
+    /// firmware-facing change. With no source frame rate this exercises the
+    /// unknown-rate default: `-r 30`, the firmware ceiling (B.4.1a).
     func testConversionArgumentsMatchProvenRecipe() {
         let arguments = IPodVideoConverter.conversionArguments(
             input: URL(fileURLWithPath: "/in/movie.mkv"),
@@ -24,7 +26,7 @@ final class ConvertTests: XCTestCase {
             "-map_metadata", "-1",
             "-metadata", "title=Movie",
             "-sn", "-dn",
-            "-c:v", "libx264",
+            "-c:v", "h264_videotoolbox",
             "-profile:v", "baseline",
             "-level", "1.3",
             "-pix_fmt", "yuv420p",
@@ -274,13 +276,13 @@ final class ConvertTests: XCTestCase {
 
     // MARK: - Error mapping
 
-    func testConversionErrorPromotesMissingLibx264() {
-        // A static/conda ffmpeg without libx264 fails deep in the run — the
+    func testConversionErrorPromotesMissingVideoToolbox() {
+        // An ffmpeg built without VideoToolbox fails deep in the run — the
         // opaque "Unknown encoder" tail becomes an actionable case.
         XCTAssertEqual(
             IPodVideoConverter.conversionError(
-                status: 234, stderrTail: "Unknown encoder 'libx264'\n"),
-            .libx264Unavailable)
+                status: 234, stderrTail: "Unknown encoder 'h264_videotoolbox'\n"),
+            .videoToolboxUnavailable)
     }
 
     func testConversionErrorKeepsGenericToolFailure() {
