@@ -170,9 +170,13 @@ final class AppState: NSObject, NSMenuDelegate {
         menu.removeAllItems()
         let background = model.queue.filter { $0.origin == .background }
         for item in background {
-            let row = menu.addItem(withTitle: "\(item.title) — \(item.stage.label)",
-                                   action: nil, keyEquivalent: "")
+            let row = menu.addItem(withTitle: "", action: nil, keyEquivalent: "")
             row.isEnabled = false   // informational rows
+            // A custom view so the row carries a progress bar; rebuilt on each
+            // open, so it reflects progress at the moment the menu is shown.
+            row.view = TransferProgressRow(title: item.title,
+                                           label: item.stage.label,
+                                           progress: item.stage.overallProgress)
         }
         if !background.isEmpty { menu.addItem(.separator()) }
         addItem(to: menu, "Open PodFlick", #selector(openMainWindow))
