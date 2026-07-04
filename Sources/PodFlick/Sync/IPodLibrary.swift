@@ -92,13 +92,16 @@ struct IPodLibrary {
         try FileManager.default.createDirectory(
             at: destination.url.deletingLastPathComponent(),
             withIntermediateDirectories: true)
-        try copy(file, to: destination.url, totalBytes: byteCount,
-                 onProgress: onCopyProgress)
         do {
+            try copy(file, to: destination.url, totalBytes: byteCount,
+                     onProgress: onCopyProgress)
             try backUpDatabase()
             try writer.data.write(to: databaseURL, options: .atomic)
         } catch {
-            // The DB never saw the track — don't leave an orphan media file.
+            // The DB never saw the track — don't leave a half-copied or
+            // orphaned media file behind. `copy` is inside the `do` because
+            // it can throw mid-stream too (a full/unplugged volume), and its
+            // partial output must be cleaned up just the same.
             try? FileManager.default.removeItem(at: destination.url)
             throw error
         }
