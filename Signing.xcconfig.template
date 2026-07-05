@@ -1,0 +1,3 @@
+// Copy to Signing.local.xcconfig (gitignored) and set your team:
+// DEVELOPMENT_TEAM = XXXXXXXXXX
+DEVELOPMENT_TEAM =
