@@ -279,8 +279,10 @@ private struct DeviceHeaderView: View {
     private func subtitle(for device: IPodDevice) -> String {
         var parts: [String] = []
         if let model = device.modelNumber { parts.append("Model \(model)") }
-        let free = "\(Formatters.bytes(device.freeBytes)) free"
-        parts.append(device.totalBytes.map { "\(free) of \(Formatters.bytes($0))" } ?? free)
+        if let freeBytes = device.freeBytes {
+            let free = "\(Formatters.bytes(freeBytes)) free"
+            parts.append(device.totalBytes.map { "\(free) of \(Formatters.bytes($0))" } ?? free)
+        }
         return parts.joined(separator: " · ")
     }
 

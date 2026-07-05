@@ -325,6 +325,16 @@ final class IPodLibraryTests: XCTestCase {
         XCTAssertEqual(backups.count, 1)
     }
 
+    func testBackupsAreCappedAtRetentionLimit() throws {
+        // Every mutation backs up the DB; without pruning they grow without
+        // bound on a space-limited volume. Go well past the cap.
+        let target = try XCTUnwrap(try library.videos().first)
+        for i in 0..<13 {
+            try library.rename(trackID: target.id, to: "take \(i)")
+        }
+        XCTAssertEqual(backups.count, 10, "old backups are pruned to the cap")
+    }
+
     func testMutationDeletesStalePlayCounts() throws {
         // The firmware indexes Play Counts by mhlt position, so a splice makes
         // it stale; each DB write must delete it (the firmware recreates it).

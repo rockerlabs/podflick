@@ -48,7 +48,7 @@ struct IPodDeviceScanner {
             modelNumber: modelNumber(sysInfo: sysInfo),
             rejection: hashRequired ? .hashRequiredModel : nil,
             databaseExists: databaseExists,
-            freeBytes: (resources?.volumeAvailableCapacity).map(Int64.init) ?? 0,
+            freeBytes: (resources?.volumeAvailableCapacity).map(Int64.init),
             videoProfile: DevicePrefs.load(volumeURL: volume).videoProfile,
             firmwareVersion: firmwareVersion(sysInfo: sysInfo),
             serialNumber: sysInfo["pszSerialNumber"],

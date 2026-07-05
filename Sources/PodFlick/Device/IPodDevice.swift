@@ -21,7 +21,7 @@ struct IPodDevice {
     let modelNumber: String?    // SysInfo ModelNumStr sans "x" prefix, e.g. "A146"; display-only
     let rejection: Rejection?
     let databaseExists: Bool    // iPod_Control/iTunes/iTunesDB present at scan time
-    let freeBytes: Int64
+    let freeBytes: Int64?      // nil = capacity read failed (unknown, not full)
     let videoProfile: VideoProfile  // from DevicePrefs; .standard unless opted in
 
     // Display-only cosmetics (B.12), all read from the volume — no USB
@@ -48,8 +48,11 @@ struct IPodDevice {
     /// overhead. 64 MiB dwarfs all three (the DB is single-digit MB).
     static let freeSpaceSlack: Int64 = 64 << 20
 
-    /// Free-space check for one incoming video file.
+    /// Free-space check for one incoming video file. Unknown free space (a
+    /// failed capacity read) must not block uploads with a bogus "full": let
+    /// the write proceed and surface a real ENOSPC only if the volume truly is.
     func canFit(fileOfSize bytes: Int64) -> Bool {
-        bytes + Self.freeSpaceSlack <= freeBytes
+        guard let freeBytes else { return true }
+        return bytes + Self.freeSpaceSlack <= freeBytes
     }
 }

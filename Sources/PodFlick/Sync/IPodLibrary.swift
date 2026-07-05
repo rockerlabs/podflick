@@ -351,6 +351,9 @@ struct IPodLibrary {
     /// "every mutation backs up the DB first — keep the behavior"). A
     /// counter suffix keeps rapid successive mutations from colliding
     /// within one second.
+    /// How many timestamped backups to retain; older ones are pruned.
+    private static let maxBackups = 10
+
     @discardableResult
     private func backUpDatabase() throws -> URL {
         let formatter = DateFormatter()
@@ -365,9 +368,30 @@ struct IPodLibrary {
             let candidate = directory.appendingPathComponent(name)
             if !FileManager.default.fileExists(atPath: candidate.path) {
                 try FileManager.default.copyItem(at: databaseURL, to: candidate)
+                pruneBackups(in: directory)
                 return candidate
             }
             counter += 1
+        }
+    }
+
+    /// Keep only the newest `maxBackups` backups (by modification time, so a
+    /// same-second counter suffix can't sort the just-made one out). Unbounded
+    /// backups would otherwise fill a space-limited FAT32 volume (and a failed
+    /// write leaks one); losing an OLD backup is harmless. Best-effort.
+    private func pruneBackups(in directory: URL) {
+        let key: URLResourceKey = .contentModificationDateKey
+        let backups = ((try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [key])) ?? [])
+            .filter { $0.lastPathComponent.hasPrefix("iTunesDB.backup-") }
+        guard backups.count > Self.maxBackups else { return }
+        let mtime = { (url: URL) in
+            (try? url.resourceValues(forKeys: [key]))?.contentModificationDate
+                ?? .distantPast
+        }
+        for stale in backups.sorted(by: { mtime($0) > mtime($1) })
+                            .dropFirst(Self.maxBackups) {
+            try? FileManager.default.removeItem(at: stale)
         }
     }
 
