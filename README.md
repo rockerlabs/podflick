@@ -66,5 +66,10 @@ The iTunesDB read/write layer is an independent, byte-level reverse engineering
 of the on-device format (see [docs/itunesdb-format.md](docs/itunesdb-format.md));
 no third-party database library is used or derived from.
 
-"iPod" and "iTunes" are trademarks of Apple Inc. PodFlick is an independent
-project, not affiliated with or endorsed by Apple.
+### Trademarks
+
+"iPod" and "iTunes" are trademarks of Apple Inc. PodFlick refers to them only
+to describe the hardware it works with (nominative use) and ships none of
+Apple's artwork or icons. PodFlick is an independent, open-source project — not
+affiliated with, endorsed by, or sponsored by Apple Inc. The same notice
+appears in the app's About panel.

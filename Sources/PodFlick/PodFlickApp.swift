@@ -11,5 +11,12 @@ struct PodFlickApp: App {
         // Owning the window means a background launch never creates one.
         // Settings is the placeholder scene SwiftUI requires.
         Settings { EmptyView() }
+            .commands {
+                // Replace the default "About PodFlick" so the panel carries the
+                // Apple-trademark disclaimer (AppState.showAboutPanel).
+                CommandGroup(replacing: .appInfo) {
+                    Button("About PodFlick") { AppState.showAboutPanel() }
+                }
+            }
     }
 }
