@@ -363,7 +363,7 @@ final class SyncModel: ObservableObject {
             // queue (a dedicated GCD thread), so it never pins the mutator: a
             // concurrent remove/rename waits only behind the fast DB splice
             // below, not the whole transfer. Only the splice is serialized.
-            let staged = try await runOffMainActor {
+            let staged = try await runOffCooperativePool {
                 try library.precheckAdd(title: title)
                 return try library.copyMedia(file: temp) { fraction in
                     // The terminal 1.0 is owned by set(.updatingDatabase) below,
@@ -393,20 +393,6 @@ final class SyncModel: ObservableObject {
         // On success AND failure: free space moved either way, and a
         // failed copy can leave a fresh orphan the banner should show.
         refreshDevices()
-    }
-
-    /// Runs blocking file I/O off BOTH the main actor and the cooperative
-    /// thread pool — a multi-GB copy must pin neither. A dedicated GCD thread
-    /// is the right home for a minutes-long syscall (same approach as
-    /// IPodEjector's unmount hop).
-    private nonisolated func runOffMainActor<T: Sendable>(
-        _ body: @escaping @Sendable () throws -> T
-    ) async throws -> T {
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                continuation.resume(with: Result { try body() })
-            }
-        }
     }
 
     private func setStage(_ stage: Stage, for id: UUID) {
@@ -516,6 +502,9 @@ final class SyncModel: ObservableObject {
     ) {
         guard let device = selectedDevice else { return }
         let volume = device.volumeURL
+        // Clear a stale error from a prior op so this write's outcome isn't
+        // reported against an unrelated earlier failure (mirrors eject()).
+        deviceError = nil
         deviceWriteTask = Task {
             do {
                 try await writeQueue.run(volume: volume) { try body(volume) }
