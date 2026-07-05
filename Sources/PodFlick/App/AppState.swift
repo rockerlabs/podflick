@@ -149,8 +149,13 @@ final class AppState: NSObject, NSMenuDelegate {
     private func showStatusItem() {
         guard statusItem == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = NSImage(systemSymbolName: "ipod",
-                                     accessibilityDescription: "PodFlick transfers")
+        // Brand glyph from the asset catalog, rendered as a template so it adapts
+        // to the light/dark menu bar; fall back to the SF Symbol if it's ever missing.
+        let icon = NSImage(named: "MenuBarIcon")
+            ?? NSImage(systemSymbolName: "ipod", accessibilityDescription: nil)
+        icon?.isTemplate = true
+        icon?.accessibilityDescription = "PodFlick transfers"
+        item.button?.image = icon
         let menu = NSMenu()
         menu.delegate = self    // rebuilt from the live queue each time it opens
         menu.autoenablesItems = false
