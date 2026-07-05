@@ -36,12 +36,15 @@ struct IPodEjector: Sendable {
     }
 
     func eject(volume: URL) async throws {
-        try await blocking(flushFileCaches)
+        // `sync` and a dissented unmount block for seconds — too long to pin a
+        // width-limited cooperative-pool thread (and far too long for the main
+        // thread), so each hops to a GCD thread for its duration.
+        try await runOffCooperativePool(flushFileCaches)
         discourageSpotlight(on: volume)
         var lastError = "no error reported"
         for attempt in 1...maxAttempts {
             do {
-                return try await blocking { try unmount(volume) }
+                return try await runOffCooperativePool { try unmount(volume) }
             } catch {
                 lastError = error.localizedDescription
                 if attempt < maxAttempts { try await Task.sleep(for: retryDelay) }
@@ -51,19 +54,6 @@ struct IPodEjector: Sendable {
                            attempts: maxAttempts, underlying: lastError)
     }
 
-    /// `sync` and a dissented unmount block for seconds — too long to pin
-    /// a width-limited cooperative-pool thread (and far too long for the
-    /// main thread), so each attempt hops to a GCD thread for its duration.
-    private func blocking<T: Sendable>(
-        _ body: @escaping @Sendable () throws -> T
-    ) async throws -> T {
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                continuation.resume(with: Result { try body() })
-            }
-        }
-    }
-
     /// Best-effort `.metadata_never_index` marker: Spotlight skips volumes
     /// carrying it, which is what keeps FUTURE mounts eject-clean. Failure
     /// to write it must not block the eject itself, so errors are ignored.
@@ -71,6 +61,20 @@ struct IPodEjector: Sendable {
         let marker = volume.appendingPathComponent(".metadata_never_index")
         if !FileManager.default.fileExists(atPath: marker.path) {
             FileManager.default.createFile(atPath: marker.path, contents: Data())
+        }
+    }
+}
+
+/// Runs blocking I/O on a dedicated GCD thread — off BOTH the main actor and
+/// the width-limited cooperative pool. The right home for a syscall too long to
+/// pin either: a volume unmount (IPodEjector) or a multi-GB media copy
+/// (SyncModel).
+func runOffCooperativePool<T: Sendable>(
+    _ body: @escaping @Sendable () throws -> T
+) async throws -> T {
+    try await withCheckedThrowingContinuation { continuation in
+        DispatchQueue.global(qos: .userInitiated).async {
+            continuation.resume(with: Result { try body() })
         }
     }
 }
