@@ -286,9 +286,23 @@ final class IPodDeviceScannerTests: XCTestCase {
 
         let device = try XCTUnwrap(scanner.scan().first)
         // The fake volume sits on the local filesystem, which has SOME room.
-        XCTAssertGreaterThan(device.freeBytes, 0)
+        let free = try XCTUnwrap(device.freeBytes)
+        XCTAssertGreaterThan(free, 0)
         XCTAssertTrue(device.canFit(fileOfSize: 1))
         // No filesystem can fit a file bigger than its free space + slack.
-        XCTAssertFalse(device.canFit(fileOfSize: device.freeBytes))
+        XCTAssertFalse(device.canFit(fileOfSize: free))
+    }
+
+    func testUnknownFreeSpaceDoesNotBlockUploads() {
+        // A failed capacity read leaves freeBytes nil; canFit must not treat
+        // that as "full" and block every upload with a bogus space error.
+        let device = IPodDevice(
+            volumeURL: URL(fileURLWithPath: "/Volumes/X"), name: "X",
+            modelNumber: nil, rejection: nil, databaseExists: true,
+            freeBytes: nil, videoProfile: .standard, firmwareVersion: nil,
+            serialNumber: nil, hasRockbox: false, rockboxVersion: nil,
+            volumeFormat: nil, totalBytes: nil)
+        XCTAssertTrue(device.canFit(fileOfSize: 5 << 30),
+                      "unknown free space must not block uploads")
     }
 }
