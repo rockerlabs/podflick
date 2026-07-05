@@ -312,6 +312,20 @@ final class IPodLibraryTests: XCTestCase {
         XCTAssertEqual(backups.count, 1)
     }
 
+    func testMutationDeletesStalePlayCounts() throws {
+        // The firmware indexes Play Counts by mhlt position, so a splice makes
+        // it stale; each DB write must delete it (the firmware recreates it).
+        let playCounts = volume.appendingPathComponent(
+            "iPod_Control/iTunes/Play Counts")
+        try Data("stale".utf8).write(to: playCounts)
+
+        let target = try XCTUnwrap(try library.videos().first)
+        try library.rename(trackID: target.id, to: "renamed")
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: playCounts.path),
+                       "a DB rewrite must delete the stale Play Counts index")
+    }
+
     func testRenameToAnotherTracksTitleThrows() throws {
         let videos = try library.videos()
         let taken = videos[0].title
