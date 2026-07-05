@@ -66,12 +66,15 @@ struct VideoProbe: Equatable {
     /// be rejected as durationUnavailable.
     private static func duration(format: RawProbe.Format?,
                                  videoStream: RawProbe.Stream) -> Double? {
-        if let text = format?.duration, let d = Double(text), d > 0 { return d }
-        if let text = videoStream.duration, let d = Double(text), d > 0 { return d }
+        // `.isFinite` rejects "inf"/"infinity" (which Double(_:) accepts and
+        // `> 0` lets through) — an infinite duration would freeze progress at
+        // 0 and poison downstream time math. NaN is already `> 0`-false.
+        if let text = format?.duration, let d = Double(text), d > 0, d.isFinite { return d }
+        if let text = videoStream.duration, let d = Double(text), d > 0, d.isFinite { return d }
         // `DURATION` has no underscore, so convertFromSnakeCase leaves the
         // tag key intact (unlike e.g. `major_brand` → `majorBrand`).
         if let text = videoStream.tags?["DURATION"],
-           let d = parseHMS(text), d > 0 { return d }
+           let d = parseHMS(text), d > 0, d.isFinite { return d }
         return nil
     }
 
