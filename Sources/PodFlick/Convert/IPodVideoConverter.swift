@@ -263,14 +263,16 @@ struct IPodVideoConverter {
     /// per-packet error line even at `-loglevel error`, and callers only
     /// ever report the last couple thousand characters.
     private static func collectText(_ handle: FileHandle) async throws -> String {
+        // Byte-level rolling tail. Reading via `.lines` would buffer a
+        // newline-less flood (a corrupt source can emit megabytes with no
+        // newline) unbounded before the cap could apply, so accumulate raw
+        // bytes and trim from the front, amortized O(1).
         let cap = 4096
-        var text = ""
-        for try await line in handle.bytes.lines {
-            text += line + "\n"
-            if text.count > cap {
-                text.removeFirst(text.count - cap)
-            }
+        var buffer = Data()
+        for try await byte in handle.bytes {
+            buffer.append(byte)
+            if buffer.count > cap * 2 { buffer.removeFirst(buffer.count - cap) }
         }
-        return text
+        return String(decoding: buffer, as: UTF8.self)
     }
 }

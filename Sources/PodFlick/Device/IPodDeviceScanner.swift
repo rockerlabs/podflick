@@ -64,7 +64,13 @@ struct IPodDeviceScanner {
     /// (DMRD ships an empty SysInfo); the support guard is the
     /// SysInfoExtended check above, not these files.
     private func keyValueFields(at url: URL) -> [String: String] {
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [:] }
+        // Cap the read: these files are well under a KB on real devices, but
+        // they live on an untrusted mounted volume — a huge (or corrupt) file
+        // must not be slurped whole into memory during a scan.
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return [:] }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 1 << 20),
+              let text = String(data: data, encoding: .utf8) else { return [:] }
         var fields: [String: String] = [:]
         for line in text.split(whereSeparator: \.isNewline) {
             let parts = line.split(separator: ":", maxSplits: 1)

@@ -249,6 +249,19 @@ final class ConvertTests: XCTestCase {
         }
     }
 
+    func testProbeDecodingRejectsNonFiniteDuration() {
+        // A crafted container reporting "inf" must be rejected, not accepted
+        // as an infinite duration that freezes progress at 0.
+        let json = Data("""
+            {"streams": [{"codec_type": "video", "codec_name": "h264",
+                          "duration": "inf"}],
+             "format": {"duration": "inf"}}
+            """.utf8)
+        XCTAssertThrowsError(try VideoProbe.decode(ffprobeJSON: json)) {
+            XCTAssertEqual($0 as? VideoProbe.ProbeError, .durationUnavailable)
+        }
+    }
+
     func testProbeFallsBackToStreamDuration() throws {
         // Unfinalized/piped WebM omits format.duration but the video stream
         // still reports one — the file converts fine, so it must be accepted.
