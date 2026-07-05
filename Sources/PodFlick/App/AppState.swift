@@ -213,6 +213,16 @@ final class AppState: NSObject, NSMenuDelegate {
         guard let device = model.selectedDevice else { return }
         let name = device.name
         model.eject()
+        // eject() refuses — and returns WITHOUT starting a task — when the
+        // queue is busy. Don't then report a fake "Eject failed" for an eject
+        // that never ran (waitUntilEjectFinished would resolve instantly on a
+        // nil task, surfacing a stale/unrelated deviceError); show its reason.
+        guard model.isEjecting else {
+            if let reason = model.deviceError {
+                notify(title: "Can’t eject yet", body: reason)
+            }
+            return
+        }
         Task { [weak self] in
             guard let self else { return }
             await self.model.waitUntilEjectFinished()
@@ -249,13 +259,19 @@ final class AppState: NSObject, NSMenuDelegate {
     }
 
     private func notify(title: String, body: String) {
-        requestNotificationAuthIfNeeded()   // fallback for quiet-only usage
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-        UNUserNotificationCenter.current()
-            .add(UNNotificationRequest(identifier: UUID().uuidString,
-                                       content: content, trigger: nil))
+        let request = UNNotificationRequest(identifier: UUID().uuidString,
+                                            content: content, trigger: nil)
+        let center = UNUserNotificationCenter.current()
+        // Resolve authorization BEFORE adding: on first use (a quiet launch)
+        // the async request would otherwise race the add() and drop the very
+        // notification this exists to deliver. requestAuthorization returns the
+        // existing decision without re-prompting once the user has chosen.
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            if granted { center.add(request) }
+        }
     }
 }
 
