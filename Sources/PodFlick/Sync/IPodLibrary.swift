@@ -141,6 +141,7 @@ struct IPodLibrary {
             dbid: dbid, itemDBID: itemDBID, timestamp: timestamp)
         try backUpDatabase()
         try writer.data.write(to: databaseURL, options: .atomic)
+        deleteStalePlayCounts()
         return Video(id: trackID, title: title, ipodPath: staged.ipodPath,
                      fileSize: staged.fileSize, durationMs: durationMs)
     }
@@ -181,6 +182,7 @@ struct IPodLibrary {
         try writer.rename(trackID: trackID, to: newTitle)
         try backUpDatabase()
         try writer.data.write(to: databaseURL, options: .atomic)
+        deleteStalePlayCounts()
     }
 
     /// Removes the DB records first, then best-effort deletes the media
@@ -192,6 +194,7 @@ struct IPodLibrary {
         try writer.remove(trackID: trackID)
         try backUpDatabase()
         try writer.data.write(to: databaseURL, options: .atomic)
+        deleteStalePlayCounts()
         if let path {
             try? FileManager.default.removeItem(at: url(forIPodPath: path))
         }
@@ -318,7 +321,24 @@ struct IPodLibrary {
             copied += Int64(chunk.count)
             onProgress(totalBytes > 0 ? Double(copied) / Double(totalBytes) : 1)
         }
+        // Flush to disk before `commit` writes a DB that references this file:
+        // on an unclean pull (a flapping cable), the firmware must not find a
+        // referenced media file whose bytes are still only in the page cache —
+        // that leaves a broken entry orphan-cleanup can't reclaim (the DB
+        // holds it). The eject flow's sync() is the belt; this is the braces.
+        try output.synchronize()
         if totalBytes == 0 { onProgress(1) }
+    }
+
+    /// The firmware's `Play Counts` file indexes tracks by mhlt position, so a
+    /// splice that shifts positions leaves it stale. iTunes deletes it after
+    /// every sync and the firmware recreates it, so PodFlick deletes it after
+    /// each DB write too (docs/itunesdb-format.md, proven behavior #6).
+    /// Best-effort: a missing file is the normal case.
+    private func deleteStalePlayCounts() {
+        try? FileManager.default.removeItem(
+            at: databaseURL.deletingLastPathComponent()
+                .appendingPathComponent("Play Counts"))
     }
 
     // MARK: - Backup
