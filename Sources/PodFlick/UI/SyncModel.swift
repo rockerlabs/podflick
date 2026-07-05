@@ -19,15 +19,19 @@ actor DeviceWriteQueue {
         }
     }
 
-    private var isClosed = false
+    // Per-volume gate: an eject closes only its own volume, so writes to any
+    // OTHER connected iPod are unaffected. The single actor still serializes
+    // every mutation across all volumes (the one-mutator invariant); only the
+    // rejection is scoped to the ejecting device.
+    private var closedVolumes: Set<URL> = []
 
-    func run<T: Sendable>(_ body: @Sendable () throws -> T) throws -> T {
-        guard !isClosed else { throw ClosedForEject() }
+    func run<T: Sendable>(volume: URL, _ body: @Sendable () throws -> T) throws -> T {
+        guard !closedVolumes.contains(volume) else { throw ClosedForEject() }
         return try body()
     }
 
-    func close() { isClosed = true }
-    func reopen() { isClosed = false }
+    func close(volume: URL) { closedVolumes.insert(volume) }
+    func reopen(volume: URL) { closedVolumes.remove(volume) }
 }
 
 /// UI state for the whole app: connected devices, the upload queue with
@@ -346,7 +350,7 @@ final class SyncModel: ObservableObject {
             set(.copying(0))
             let library = IPodLibrary(volumeURL: device.volumeURL)
             let title = item.title
-            _ = try await writeQueue.run {
+            _ = try await writeQueue.run(volume: device.volumeURL) {
                 try library.add(file: temp, title: title,
                                 durationMs: durationMs) { fraction in
                     Task { @MainActor [weak self] in
@@ -397,13 +401,13 @@ final class SyncModel: ObservableObject {
             // close() is both the barrier for a remove/rename fired just
             // before the eject click and the gate rejecting writes for the
             // eject's duration.
-            await writeQueue.close()
+            await writeQueue.close(volume: volume)
             do {
                 try await ejector.eject(volume: volume)
             } catch {
                 deviceError = "\(error)"
             }
-            await writeQueue.reopen()   // other connected iPods stay writable
+            await writeQueue.reopen(volume: volume)   // other iPods were never gated
             ejectTask = nil
         }
     }
@@ -468,7 +472,7 @@ final class SyncModel: ObservableObject {
         let volume = device.volumeURL
         deviceWriteTask = Task {
             do {
-                try await writeQueue.run { try body(volume) }
+                try await writeQueue.run(volume: volume) { try body(volume) }
             } catch {
                 deviceError = "\(error)"
             }
