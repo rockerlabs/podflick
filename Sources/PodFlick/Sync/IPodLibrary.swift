@@ -243,8 +243,12 @@ struct IPodLibrary {
         let musicDir = volume.appendingPathComponent("iPod_Control/Music",
                                                      isDirectory: true)
         let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey]
+        // skipsHiddenFiles keeps the walk out of hidden DIRECTORIES too (e.g.
+        // a stray .Spotlight-V100 under Music): a non-dot regular file inside
+        // one must never be flagged as an orphan and deleted.
         guard let files = FileManager.default.enumerator(
-            at: musicDir, includingPropertiesForKeys: Array(keys)) else { return [] }
+            at: musicDir, includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles]) else { return [] }
 
         var orphans: [Orphan] = []
         for case let file as URL in files {

@@ -118,6 +118,17 @@ final class SyncModelTests: XCTestCase {
         XCTAssertTrue(model.queue.isEmpty)
     }
 
+    func testEnqueueCapsAFloodedBatch() throws {
+        // A crafted podflick:// URL can carry thousands of path= items; one
+        // request must not flood the queue past the cap.
+        try makeVolume("IPOD")
+        let model = makeModel(tools: nil)
+        let one = volumesRoot.appendingPathComponent("v.mp4")
+
+        model.enqueue(Array(repeating: one, count: 250))
+        XCTAssertEqual(model.queue.count, 200, "the batch is capped at maxEnqueueBatch")
+    }
+
     /// Drops and background (service/URL) transfers share the one queue but
     /// carry their origin so the app knows where to report progress (B.9).
     func testEnqueueTagsOriginDropVsBackground() throws {
