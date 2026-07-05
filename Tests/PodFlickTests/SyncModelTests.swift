@@ -234,20 +234,28 @@ final class SyncModelTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(model.deviceError).contains("could not eject"))
     }
 
-    func testEjectRefusedWhileQueueIsBusy() throws {
+    func testEjectRefusedWhileQueueIsBusy() async throws {
         try makeVolume("IPOD")
         let unmounts = Recorder<URL>()
         let model = makeModel(ejector: makeStubEjector(unmounts: unmounts))
 
-        // Freshly enqueued items sit in .waiting until the worker's first
-        // suspension resolves, so the queue is deterministically busy here.
+        // Pin the enqueued item mid-flight so the queue is provably busy when
+        // eject is attempted — not merely because a synchronous test starved
+        // the worker Task before it could run (see beforeProcessItem).
+        let barrier = AsyncBarrier()
+        model.beforeProcessItem = { await barrier.arrive() }
         model.enqueue([volumesRoot.appendingPathComponent("a.mp4")])
+        await barrier.waitUntilArrived()
         XCTAssertTrue(model.queueIsBusy)
+
         model.eject()
 
         XCTAssertFalse(model.isEjecting)
         XCTAssertTrue(unmounts.recorded.isEmpty)
         XCTAssertTrue(try XCTUnwrap(model.deviceError).contains("uploads in progress"))
+
+        await barrier.release()
+        await model.waitUntilQueueDrained()
     }
 
     func testWriteQueueGateIsPerVolume() async throws {
@@ -321,7 +329,7 @@ final class SyncModelTests: XCTestCase {
         XCTAssertEqual(model.deviceVideos.count, 4, "the library is untouched")
     }
 
-    func testCleanUpOrphansRefusedWhileUploadInFlight() throws {
+    func testCleanUpOrphansRefusedWhileUploadInFlight() async throws {
         // With the copy off the write queue (B.17 #1), a just-staged upload
         // file looks orphaned; orphan cleanup must be refused while an upload
         // is in flight so it can't delete a file a pending commit references.
@@ -335,8 +343,12 @@ final class SyncModelTests: XCTestCase {
         let model = makeModel()
         XCTAssertFalse(model.orphans.isEmpty)
 
-        // A freshly enqueued item makes the queue busy before its worker runs.
+        // Hold the upload mid-flight so the queue is provably busy (not just
+        // because the worker Task hasn't been scheduled — see beforeProcessItem).
+        let barrier = AsyncBarrier()
+        model.beforeProcessItem = { await barrier.arrive() }
         model.enqueue([volumesRoot.appendingPathComponent("a.mp4")])
+        await barrier.waitUntilArrived()
         XCTAssertTrue(model.queueIsBusy)
 
         model.cleanUpOrphans()
@@ -344,6 +356,9 @@ final class SyncModelTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: orphan.path),
                       "an in-flight upload must block orphan deletion")
         XCTAssertTrue(try XCTUnwrap(model.deviceError).contains("upload is in progress"))
+
+        await barrier.release()
+        await model.waitUntilQueueDrained()
     }
 
     /// The banner's list can go stale between scan and click; entries

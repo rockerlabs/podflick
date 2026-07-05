@@ -54,6 +54,41 @@ final class Recorder<Element>: @unchecked Sendable {
     }
 }
 
+/// A one-shot async barrier that makes "an item is held in-flight" a
+/// deterministic fact rather than a scheduling accident. The code under test
+/// calls `arrive()`, which suspends until the test calls `release()`; the test
+/// calls `waitUntilArrived()` to observe that the code has reached the barrier
+/// before it asserts. Used to pin a queued upload mid-flight so `queueIsBusy`
+/// is provably true when eject/orphan-cleanup refusal is checked.
+actor AsyncBarrier {
+    private var released = false
+    private var blocked: CheckedContinuation<Void, Never>?
+    private var arrived = false
+    private var arrivalWaiter: CheckedContinuation<Void, Never>?
+
+    /// Awaited by the code under test — suspends until `release()`.
+    func arrive() async {
+        arrived = true
+        arrivalWaiter?.resume()
+        arrivalWaiter = nil
+        guard !released else { return }
+        await withCheckedContinuation { blocked = $0 }
+    }
+
+    /// Awaited by the test — returns once the code has reached `arrive()`.
+    func waitUntilArrived() async {
+        guard !arrived else { return }
+        await withCheckedContinuation { arrivalWaiter = $0 }
+    }
+
+    /// Lets the held (or a future) `arrive()` call proceed.
+    func release() {
+        released = true
+        blocked?.resume()
+        blocked = nil
+    }
+}
+
 /// Stub `IPodEjector`: no real cache flush, near-zero retry delay, and an
 /// unmount seam that records into `unmounts` and fails the first
 /// `failFirst` attempts with a "volume is busy" error (`.max` = always).
