@@ -123,6 +123,31 @@ final class AppState: NSObject, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    // MARK: - About panel
+
+    /// The trademark disclaimer shown in the About panel — PodFlick uses Apple
+    /// product names nominatively and ships none of Apple's artwork. Single
+    /// source for the code side; the README's Trademarks section is the fuller
+    /// prose counterpart and points back at this in-app notice.
+    static let trademarkNotice =
+        "“iPod” and “iTunes” are trademarks of Apple Inc. PodFlick is an "
+      + "independent, open-source project — not affiliated with, endorsed "
+      + "by, or sponsored by Apple Inc."
+
+    /// The standard macOS About panel, augmented with the trademark disclaimer.
+    /// Wired to the app menu's "About PodFlick" item by PodFlickApp's command group.
+    static func showAboutPanel() {
+        let credits = NSAttributedString(
+            string: trademarkNotice,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]
+        )
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(options: [.credits: credits])
+    }
+
     // MARK: - Background mode
 
     /// Quiet mode for a cold service/URL launch: no Dock icon, no window (none
@@ -152,7 +177,7 @@ final class AppState: NSObject, NSMenuDelegate {
         // Brand glyph from the asset catalog, rendered as a template so it adapts
         // to the light/dark menu bar; fall back to the SF Symbol if it's ever missing.
         let icon = NSImage(named: "MenuBarIcon")
-            ?? NSImage(systemSymbolName: "ipod", accessibilityDescription: nil)
+            ?? NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: nil)
         icon?.isTemplate = true
         icon?.accessibilityDescription = "PodFlick transfers"
         item.button?.image = icon

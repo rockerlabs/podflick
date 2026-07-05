@@ -1,5 +1,30 @@
 import SwiftUI
 
+/// The app's own brand mark — a media item dropping onto a device tray — used
+/// wherever the UI needs a device glyph, in place of Apple's "ipod" SF Symbol,
+/// so PodFlick ships no Apple product artwork or trade dress. Vector-drawn so it
+/// stays crisp at any size; mirrors `Design/icons/podflick-menubar.svg`.
+struct BrandGlyph: View {
+    var color: Color = .primary
+
+    var body: some View {
+        Canvas { ctx, size in
+            let s = min(size.width, size.height) / 24
+            func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { .init(x: x * s, y: y * s) }
+            let line = StrokeStyle(lineWidth: 2.2 * s, lineCap: .round, lineJoin: .round)
+            var stem = Path()
+            stem.move(to: pt(12, 3.6)); stem.addLine(to: pt(12, 11.4))
+            var chevron = Path()
+            chevron.move(to: pt(8.2, 8)); chevron.addLine(to: pt(12, 12)); chevron.addLine(to: pt(15.8, 8))
+            ctx.stroke(stem, with: .color(color), style: line)
+            ctx.stroke(chevron, with: .color(color), style: line)
+            let bar = Path(roundedRect: .init(x: 5 * s, y: 15.4 * s, width: 14 * s, height: 4.4 * s),
+                           cornerRadius: 2.2 * s)
+            ctx.fill(bar, with: .color(color))
+        }
+    }
+}
+
 /// Main window: device header, upload queue, and the on-device video list.
 /// Dropping files anywhere in the window enqueues them.
 struct ContentView: View {
@@ -106,13 +131,19 @@ struct ContentView: View {
     @ViewBuilder
     private var videoList: some View {
         if model.selectedDevice == nil {
-            emptyState("ipod", "Connect an iPod",
-                       "Plug in an iPod 5G/5.5G and it appears here.")
+            emptyState("Connect an iPod",
+                       "Plug in an iPod 5G/5.5G and it appears here.") {
+                BrandGlyph(color: .secondary).frame(width: 56, height: 56)
+            }
         } else if model.deviceVideos.isEmpty {
-            emptyState("film", "No videos on this iPod",
+            emptyState("No videos on this iPod",
                        model.canAcceptDrops
                            ? "Drop video files anywhere in this window to upload them."
-                           : "")
+                           : "") {
+                Image(systemName: "film")
+                    .font(.system(size: 56))
+                    .foregroundStyle(.secondary)
+            }
         } else {
             List {
                 Section("Videos on iPod (\(model.deviceVideos.count))") {
@@ -133,12 +164,10 @@ struct ContentView: View {
         }
     }
 
-    private func emptyState(_ symbol: String, _ title: String,
-                            _ subtitle: String) -> some View {
+    private func emptyState(_ title: String, _ subtitle: String,
+                            @ViewBuilder icon: () -> some View) -> some View {
         VStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 56))
-                .foregroundStyle(.secondary)
+            icon()
             Text(title).font(.title2)
             if !subtitle.isEmpty {
                 Text(subtitle).foregroundStyle(.secondary)
@@ -187,9 +216,8 @@ private struct DeviceHeaderView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "ipod")
-                .font(.system(size: 28))
-                .foregroundStyle(model.selectedDevice == nil ? .secondary : .primary)
+            BrandGlyph(color: model.selectedDevice == nil ? .secondary : .primary)
+                .frame(width: 28, height: 28)
             if let device = model.selectedDevice {
                 let rows = infoRows(for: device)
                 VStack(alignment: .leading, spacing: 2) {
