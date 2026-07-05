@@ -239,6 +239,27 @@ final class SyncModelTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(model.deviceError).contains("uploads in progress"))
     }
 
+    func testWriteQueueGateIsPerVolume() async throws {
+        // Closing the gate for one ejecting volume must not block writes to a
+        // different connected iPod.
+        let queue = DeviceWriteQueue()
+        let ejecting = URL(fileURLWithPath: "/Volumes/EJECTING")
+        let other = URL(fileURLWithPath: "/Volumes/OTHER")
+        await queue.close(volume: ejecting)
+
+        do {
+            _ = try await queue.run(volume: ejecting) { 1 }
+            XCTFail("a write to the ejecting volume must be rejected")
+        } catch is DeviceWriteQueue.ClosedForEject { /* expected */ }
+
+        let onOther = try await queue.run(volume: other) { 42 }
+        XCTAssertEqual(onOther, 42, "the other iPod must stay writable")
+
+        await queue.reopen(volume: ejecting)
+        let reopened = try await queue.run(volume: ejecting) { 7 }
+        XCTAssertEqual(reopened, 7, "reopen restores writes to the volume")
+    }
+
     // MARK: - Video profile
 
     func testSetVideoProfilePersistsOnDeviceAndRefreshesSnapshot() async throws {
