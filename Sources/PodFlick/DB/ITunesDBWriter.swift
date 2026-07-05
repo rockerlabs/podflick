@@ -68,6 +68,11 @@ struct ITunesDBWriter {
         }
 
         let base = maxUsedID()
+        // ids are a never-renumbered monotonic counter (the hard invariant),
+        // so guard the u32 ceiling rather than trapping on base + 3.
+        guard base <= UInt32.max - 3 else {
+            throw WriteError(message: "track-id space exhausted (max used id \(base))")
+        }
         let trackID = base + 2
         let itemID = base + 3
 
@@ -105,7 +110,7 @@ struct ITunesDBWriter {
         }
         try apply([Edit(
             range: titleRange,
-            replacement: Self.stringMhod(type: 1, newTitle),
+            replacement: try Self.stringMhod(type: 1, newTitle),
             sizeBumpOffsets: [track.offset + 8, track.section.offset + 8],
             countBump: nil)])
     }
@@ -152,7 +157,18 @@ struct ITunesDBWriter {
     /// lower-lying edit — so nothing already patched ever shifts.
     private mutating func apply(_ edits: [Edit]) throws {
         for edit in edits.sorted(by: { $0.range.lowerBound > $1.range.lowerBound }) {
-            assert(edit.sizeBumpOffsets.allSatisfy { $0 < edit.range.lowerBound })
+            // Descending order is correct only if EVERY patched offset — size
+            // and count alike — sits below its edit's range; otherwise a
+            // not-yet-applied lower edit would relocate a byte we already
+            // bumped. Enforced in release (unlike the old debug-only assert)
+            // and recoverable: a violation aborts the mutation, never writes a
+            // corrupt DB.
+            let bumpOffsets = edit.sizeBumpOffsets
+                + (edit.countBump.map { [$0.offset] } ?? [])
+            guard bumpOffsets.allSatisfy({ $0 < edit.range.lowerBound }) else {
+                throw WriteError(message:
+                    "splice bump offset not below its edit range @0x\(String(edit.range.lowerBound, radix: 16))")
+            }
             let delta = edit.replacement.count - edit.range.count
             data.replaceSubrange(edit.range, with: edit.replacement)
             for offset in edit.sizeBumpOffsets + [8] {  // 8 = mhbd total size
@@ -184,11 +200,15 @@ struct ITunesDBWriter {
         guard donor.headerSize >= 0x1F8 else {
             throw WriteError(message: "donor mhit header 0x\(String(donor.headerSize, radix: 16)) too small to clone")
         }
-        let children = Self.stringMhod(type: 1, new.title)
+        let children = try Self.stringMhod(type: 1, new.title)
                      + data.subdata(in: kindRange)
                      + Self.stringMhod(type: 2, new.ipodPath)
         var header = data.subdata(in: donor.offset ..< donor.offset + donor.headerSize)
-        header.putU32(UInt32(donor.headerSize + children.count), at: 0x08)
+        guard let cloneTotal = UInt32(exactly: donor.headerSize + children.count) else {
+            throw WriteError(message:
+                "cloned mhit total \(donor.headerSize + children.count) overflows u32")
+        }
+        header.putU32(cloneTotal, at: 0x08)
         header.putU32(3, at: 0x0C)              // child mhod count
         header.putU32(id, at: 0x10)
         header.putU32(timestamp, at: 0x20)      // date modified
@@ -225,7 +245,11 @@ struct ITunesDBWriter {
         blob.putU64(itemDBID, at: 0x3C)
         // mhod100 carries an order/position value: donor's + a small bump.
         let positionOffset = headerSize + 0x18
-        blob.putU32(try Reader(blob).u32(positionOffset) + 2, at: positionOffset)
+        let position = try Reader(blob).u32(positionOffset)
+        guard let bumped = UInt32(exactly: UInt64(position) + 2) else {
+            throw WriteError(message: "mhod100 position \(position) overflows u32")
+        }
+        blob.putU32(bumped, at: positionOffset)
         return blob
     }
 
@@ -236,16 +260,24 @@ struct ITunesDBWriter {
     /// the 2026-07-04 device smoke proved the firmware rejects a padded one
     /// (empty menus) — the reference's `(…+3)&~3` is a latent bug its
     /// selftest never hits (all generated titles happened to be 4-aligned).
-    private static func stringMhod(type: UInt32, _ text: String) -> Data {
+    private static func stringMhod(type: UInt32, _ text: String) throws -> Data {
         // Explicit-endian UTF-16 encoding emits no BOM and cannot fail.
         let payload = text.data(using: .utf16LittleEndian)!
+        // Title/path length is filesystem-bounded in practice, but a value
+        // that overflows the u32 length/total fields must fail loudly as a
+        // WriteError, not trap the process (the byte layer's discipline).
+        guard let payloadLen = UInt32(exactly: payload.count),
+              let total = UInt32(exactly: 0x18 + 16 + payload.count) else {
+            throw WriteError(message:
+                "string mhod payload \(payload.count) bytes overflows u32")
+        }
         var mhod = Data(count: 0x18 + 16 + payload.count)
         mhod.replaceSubrange(0..<4, with: Data("mhod".utf8))
         mhod.putU32(0x18, at: 4)
-        mhod.putU32(UInt32(mhod.count), at: 8)
+        mhod.putU32(total, at: 8)
         mhod.putU32(type, at: 12)
         mhod.putU32(1, at: 0x18)                // encoding: UTF-16LE
-        mhod.putU32(UInt32(payload.count), at: 0x1C)
+        mhod.putU32(payloadLen, at: 0x1C)
         mhod.putU32(1, at: 0x20)
         mhod.replaceSubrange(0x28 ..< 0x28 + payload.count, with: payload)
         return mhod

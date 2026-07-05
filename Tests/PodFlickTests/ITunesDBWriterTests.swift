@@ -158,4 +158,22 @@ final class ITunesDBWriterTests: XCTestCase {
         XCTAssertThrowsError(try writer.rename(trackID: 999_999, to: "x"))
         XCTAssertThrowsError(try writer.remove(trackID: 999_999))
     }
+
+    // MARK: - Overflow guards (fail loudly, never trap)
+
+    func testAddThrowsWhenIDSpaceExhausted() throws {
+        // Patch a track id to the u32 ceiling so maxUsedID() saturates; add
+        // must throw a recoverable WriteError, not trap on base + 3.
+        var data = try fixture("iTunesDB.four-videos")
+        let idOffset = try XCTUnwrap(ITunesDB.parse(data).tracks.first).offset + 0x10
+        withUnsafeBytes(of: UInt32.max.littleEndian) { raw in
+            for (i, byte) in raw.enumerated() { data[idOffset + i] = byte }
+        }
+        var writer = try ITunesDBWriter(data)
+        XCTAssertThrowsError(try writer.add(newVideo, dbid: dbid,
+                                            itemDBID: itemDBID,
+                                            timestamp: timestamp)) { error in
+            XCTAssertTrue("\(error)".contains("id space exhausted"), "\(error)")
+        }
+    }
 }
