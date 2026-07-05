@@ -176,4 +176,28 @@ final class ITunesDBWriterTests: XCTestCase {
             XCTAssertTrue("\(error)".contains("id space exhausted"), "\(error)")
         }
     }
+
+    // MARK: - Exact-size string mhods on the add path (firmware-critical)
+
+    func testAddWritesExactSizeTitleAndPathMhods() throws {
+        // A padded (4-aligned) string mhod makes the firmware show empty menus
+        // (proven on device 2026-07-04). The re-parse self-check can't catch a
+        // padded-but-parseable mhod, so this pins the add path's exactness
+        // directly (rename is covered by testRenameToUnalignedTitle…).
+        var writer = try ITunesDBWriter(try fixture("iTunesDB.four-videos"))
+        let new = ITunesDBWriter.NewTrack(
+            title: "xyz",                                  // 6 UTF-16 bytes (unaligned)
+            ipodPath: ":iPod_Control:Music:F07:ABC.m4v",   // 62 bytes (unaligned)
+            fileSize: 1000, durationMs: 1000)
+        let id = try writer.add(new, dbid: dbid, itemDBID: itemDBID,
+                                timestamp: timestamp)
+        let track = try XCTUnwrap(writer.db.tracks.first { $0.id == id })
+
+        let titleBytes = new.title.data(using: .utf16LittleEndian)!.count
+        XCTAssertEqual(try XCTUnwrap(track.titleMhodRange).count,
+                       0x18 + 16 + titleBytes, "title mhod must be exact-size")
+        let pathBytes = new.ipodPath.data(using: .utf16LittleEndian)!.count
+        XCTAssertEqual(try XCTUnwrap(track.pathMhodRange).count,
+                       0x18 + 16 + pathBytes, "path mhod must be exact-size")
+    }
 }
