@@ -158,6 +158,15 @@ final class SyncModel: ObservableObject {
     /// drops show their result in the window and ignore it.
     var onItemFinished: ((QueueItem) -> Void)?
 
+    /// Test seam: awaited once at the very start of processing each queued
+    /// item, while it is still `.waiting`. The production default is a no-op;
+    /// a test installs a barrier that suspends here to hold an item genuinely
+    /// in-flight, so `queueIsBusy` is deterministically true regardless of
+    /// when the worker Task happens to be scheduled (the alternative — leaning
+    /// on the worker not having run yet — only holds by accident in a
+    /// synchronous test and silently breaks the moment one adds an `await`).
+    var beforeProcessItem: @Sendable () async -> Void = {}
+
     let tools: FFmpegTools?
     private let scanner: IPodDeviceScanner
     private let ejector: IPodEjector
@@ -309,6 +318,11 @@ final class SyncModel: ObservableObject {
     private func process(_ item: QueueItem) async {
         let id = item.id
         func set(_ stage: Stage) { setStage(stage, for: id) }
+
+        // No-op in production; a test can suspend here to hold this item
+        // in-flight (still `.waiting`, so `queueIsBusy` stays true) while it
+        // exercises eject/orphan-cleanup refusal against a genuinely busy queue.
+        await beforeProcessItem()
 
         guard let tools else {
             set(.failed("ffmpeg not found — install it (brew install ffmpeg) and relaunch"))
