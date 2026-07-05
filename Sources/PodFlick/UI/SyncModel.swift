@@ -257,12 +257,21 @@ final class SyncModel: ObservableObject {
         enqueue(urls, origin: .background)
     }
 
+    /// Cap on one enqueue batch: a crafted podflick:// URL can carry thousands
+    /// of path= items, so bound how many a single request can add. An invalid
+    /// path (nonexistent, a directory, a non-video) is deliberately NOT dropped
+    /// here — it fails visibly at the probe stage with a clear message, and it
+    /// can't harm the pipeline (a bad path just makes ffprobe fail), so silent
+    /// filtering would only cost the user feedback with no security gain.
+    private static let maxEnqueueBatch = 200
+
     private func enqueue(_ urls: [URL], origin: Origin) {
         let target = selectedVolume
-        let incoming = urls.filter(\.isFileURL).map {
-            QueueItem(sourceURL: $0, title: IPodVideoConverter.title(for: $0),
-                      targetVolume: target, origin: origin)
-        }
+        let incoming = urls
+            .filter(\.isFileURL)
+            .prefix(Self.maxEnqueueBatch)
+            .map { QueueItem(sourceURL: $0, title: IPodVideoConverter.title(for: $0),
+                             targetVolume: target, origin: origin) }
         guard !incoming.isEmpty else { return }
         queue.append(contentsOf: incoming)
         startWorkerIfIdle()

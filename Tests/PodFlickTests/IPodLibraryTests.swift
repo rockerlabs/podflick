@@ -109,6 +109,19 @@ final class IPodLibraryTests: XCTestCase {
         XCTAssertEqual(try library.orphanedFiles(), [])
     }
 
+    func testOrphanScanSkipsFilesInsideHiddenDirectories() throws {
+        // A regular file inside a hidden dir under Music (e.g. a stray Spotlight
+        // store) must not be flagged as an orphan and offered for deletion.
+        let hidden = volume.appendingPathComponent(
+            "iPod_Control/Music/.Spotlight-V100")
+        try FileManager.default.createDirectory(
+            at: hidden, withIntermediateDirectories: true)
+        try Data("meta".utf8).write(to: hidden.appendingPathComponent("store.db"))
+
+        XCTAssertEqual(try library.orphanedFiles(), [],
+                       "files inside hidden directories are not orphans")
+    }
+
     // MARK: - add
 
     func testAddCopiesFileAndWritesWriterIdenticalDB() throws {
