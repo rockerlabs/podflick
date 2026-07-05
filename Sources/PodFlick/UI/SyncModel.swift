@@ -350,15 +350,32 @@ final class SyncModel: ObservableObject {
             set(.copying(0))
             let library = IPodLibrary(volumeURL: device.volumeURL)
             let title = item.title
-            _ = try await writeQueue.run(volume: device.volumeURL) {
-                try library.add(file: temp, title: title,
-                                durationMs: durationMs) { fraction in
+            // The multi-GB copy runs OFF both the main actor and the write
+            // queue (a dedicated GCD thread), so it never pins the mutator: a
+            // concurrent remove/rename waits only behind the fast DB splice
+            // below, not the whole transfer. Only the splice is serialized.
+            let staged = try await runOffMainActor {
+                try library.precheckAdd(title: title)
+                return try library.copyMedia(file: temp) { fraction in
+                    // The terminal 1.0 is owned by set(.updatingDatabase) below,
+                    // so the copy phase only reports its in-progress fractions.
+                    guard fraction < 1 else { return }
                     Task { @MainActor [weak self] in
-                        // The copy is done at 1; what remains is the DB write.
-                        self?.setStage(fraction < 1 ? .copying(fraction)
-                                                    : .updatingDatabase, for: id)
+                        self?.setStage(.copying(fraction), for: id)
                     }
                 }
+            }
+            set(.updatingDatabase)
+            do {
+                _ = try await writeQueue.run(volume: device.volumeURL) {
+                    try library.commit(staged: staged, title: title,
+                                       durationMs: durationMs)
+                }
+            } catch {
+                // The DB never referenced it — don't leave the staged file
+                // behind as an orphan.
+                try? FileManager.default.removeItem(at: staged.url)
+                throw error
             }
             set(.done)
         } catch {
@@ -367,6 +384,20 @@ final class SyncModel: ObservableObject {
         // On success AND failure: free space moved either way, and a
         // failed copy can leave a fresh orphan the banner should show.
         refreshDevices()
+    }
+
+    /// Runs blocking file I/O off BOTH the main actor and the cooperative
+    /// thread pool — a multi-GB copy must pin neither. A dedicated GCD thread
+    /// is the right home for a minutes-long syscall (same approach as
+    /// IPodEjector's unmount hop).
+    private nonisolated func runOffMainActor<T: Sendable>(
+        _ body: @escaping @Sendable () throws -> T
+    ) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(with: Result { try body() })
+            }
+        }
     }
 
     private func setStage(_ stage: Stage, for id: UUID) {
@@ -445,13 +476,19 @@ final class SyncModel: ObservableObject {
         }
     }
 
-    /// Deletes the currently listed orphans — but only those that are
-    /// STILL orphans by the time the write queue gets to us. The banner's
-    /// list can go stale: a scan during an in-flight upload sees the
-    /// half-copied file as unreferenced, and this deletion serializes
-    /// BEHIND that upload's DB splice. Re-verifying inside the same
-    /// queued transaction closes the race for good.
+    /// Deletes the currently listed orphans. Refused while an upload is in
+    /// flight: since the copy now runs OFF the write queue (B.17 #1), a
+    /// just-staged media file sits on disk unreferenced by the DB — and the
+    /// queue is free — for the whole copy, so an orphan scan would flag it and
+    /// this cleanup would delete the file the pending `commit` is about to
+    /// reference. `queueIsBusy` holds for the entire upload (a staged file only
+    /// exists while it does), so gating on it closes that window. The
+    /// in-transaction re-verify below still guards slower stale-banner races.
     func cleanUpOrphans() {
+        guard !queueIsBusy else {
+            deviceError = "an upload is in progress — clean up orphans once it finishes"
+            return
+        }
         let doomed = orphans
         guard !doomed.isEmpty else { return }
         performDeviceWrite { volume in

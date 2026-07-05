@@ -25,6 +25,9 @@ struct IPodLibrary {
         /// FAT32 and the DB's u32 size field both cap files at 4 GiB.
         case fileTooLarge(Int64)
         case noFreeMediaName
+        /// The donor-clone splice needs an existing track + playlist entry to
+        /// clone; a library with none can't be seeded by PodFlick.
+        case cannotAddToEmptyLibrary
 
         var description: String {
             switch self {
@@ -34,6 +37,9 @@ struct IPodLibrary {
                 return "file is \(bytes) bytes — over the 4 GiB FAT32/DB limit"
             case .noFreeMediaName:
                 return "could not find a free Music/FNN file name"
+            case .cannotAddToEmptyLibrary:
+                return "this iPod has no videos yet — add the first one with "
+                     + "Finder/iTunes, then PodFlick can add more"
             }
         }
     }
@@ -57,14 +63,91 @@ struct IPodLibrary {
             .map(Video.init(track:))
     }
 
-    // MARK: - add
+    // MARK: - add (two-phase: copy off the write queue, splice on it)
 
-    /// Copies a converted video into `iPod_Control/Music/FNN/XXXX.m4v` and
-    /// splices it into the DB. The splice is computed BEFORE the copy so a
-    /// bad DB (no donor, duplicate title) fails fast, not after gigabytes.
-    ///
-    /// `folder`/`filename` and the writer's ids default to the reference's
-    /// random picks; tests inject fixed values for determinism.
+    /// Media copied to the device but not yet spliced into the DB — the
+    /// output of `copyMedia`, the input to `commit`.
+    struct Staged: Sendable {
+        let url: URL
+        let ipodPath: String
+        let fileSize: UInt32
+    }
+
+    /// Cheap fast-fail before the (multi-GB) copy: reject a duplicate title
+    /// against the current DB. `commit` re-checks authoritatively under the
+    /// write lock, but this spares a gigabyte copy in the common case.
+    func precheckAdd(title: String) throws {
+        let db = try ITunesDB.parse(try Data(contentsOf: databaseURL))
+        guard !db.tracks.contains(where: { $0.title == title }) else {
+            throw LibraryError.duplicateTitle(title)
+        }
+        // The donor-clone splice needs a track and — since it clones into
+        // EVERY master-playlist copy — an mhip to clone in each. Reject an
+        // unseedable DB BEFORE copying gigabytes (matches commit's per-master
+        // requirement; commit re-validates authoritatively via ITunesDBWriter).
+        guard !db.tracks.isEmpty,
+              !db.masterPlaylists.isEmpty,
+              db.masterPlaylists.allSatisfy({ !$0.items.isEmpty }) else {
+            throw LibraryError.cannotAddToEmptyLibrary
+        }
+    }
+
+    /// Phase 1 — no DB access, so the queued upload runs it OFF the write
+    /// queue: copy the converted video into `iPod_Control/Music/FNN/XXXX.m4v`.
+    /// The partial copy is removed on failure; the returned `Staged` feeds
+    /// `commit`. `folder`/`filename` default to the reference's random picks;
+    /// tests inject fixed values for determinism.
+    func copyMedia(file: URL, folder: String? = nil, filename: String? = nil,
+                   onProgress: @Sendable (Double) -> Void = { _ in }) throws -> Staged {
+        let byteCount = try fileSize(of: file)
+        guard let fileSize = UInt32(exactly: byteCount) else {
+            throw LibraryError.fileTooLarge(byteCount)
+        }
+        let destination = try mediaDestination(
+            folder: folder, filename: filename,
+            fileExtension: file.pathExtension.isEmpty ? "m4v" : file.pathExtension)
+        try FileManager.default.createDirectory(
+            at: destination.url.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
+        do {
+            try copy(file, to: destination.url, totalBytes: byteCount,
+                     onProgress: onProgress)
+        } catch {
+            // A copy can throw mid-stream (a full/unplugged volume); its
+            // partial output must not linger as an orphan.
+            try? FileManager.default.removeItem(at: destination.url)
+            throw error
+        }
+        return Staged(url: destination.url, ipodPath: destination.ipodPath,
+                      fileSize: fileSize)
+    }
+
+    /// Phase 2 — the serialized one-mutator section: splice already-copied
+    /// media into the DB. Re-checks the duplicate title (another add may have
+    /// landed one since `precheckAdd`, as they serialize here, not there). On
+    /// failure the caller removes `staged.url` — the DB never referenced it.
+    @discardableResult
+    func commit(staged: Staged, title: String, durationMs: UInt32,
+                dbid: UInt64 = ITunesDBWriter.randomDBID(),
+                itemDBID: UInt64 = ITunesDBWriter.randomDBID(),
+                timestamp: UInt32 = ITunesDBWriter.macTimestampNow()) throws -> Video {
+        var writer = try ITunesDBWriter(try Data(contentsOf: databaseURL))
+        guard !writer.db.tracks.contains(where: { $0.title == title }) else {
+            throw LibraryError.duplicateTitle(title)
+        }
+        let trackID = try writer.add(
+            .init(title: title, ipodPath: staged.ipodPath,
+                  fileSize: staged.fileSize, durationMs: durationMs),
+            dbid: dbid, itemDBID: itemDBID, timestamp: timestamp)
+        try backUpDatabase()
+        try writer.data.write(to: databaseURL, options: .atomic)
+        return Video(id: trackID, title: title, ipodPath: staged.ipodPath,
+                     fileSize: staged.fileSize, durationMs: durationMs)
+    }
+
+    /// Atomic copy+splice for callers that don't need the copy off the write
+    /// queue (tests, any single-shot add). The queued upload path in SyncModel
+    /// splits `copyMedia`/`commit` so the multi-GB copy never pins the mutator.
     @discardableResult
     func add(file: URL, title: String, durationMs: UInt32,
              folder: String? = nil, filename: String? = nil,
@@ -72,41 +155,16 @@ struct IPodLibrary {
              itemDBID: UInt64 = ITunesDBWriter.randomDBID(),
              timestamp: UInt32 = ITunesDBWriter.macTimestampNow(),
              onCopyProgress: @Sendable (Double) -> Void = { _ in }) throws -> Video {
-        var writer = try ITunesDBWriter(try Data(contentsOf: databaseURL))
-        guard !writer.db.tracks.contains(where: { $0.title == title }) else {
-            throw LibraryError.duplicateTitle(title)
-        }
-        let byteCount = try fileSize(of: file)
-        guard let fileSize = UInt32(exactly: byteCount) else {
-            throw LibraryError.fileTooLarge(byteCount)
-        }
-
-        let destination = try mediaDestination(
-            folder: folder, filename: filename,
-            fileExtension: file.pathExtension.isEmpty ? "m4v" : file.pathExtension)
-        let trackID = try writer.add(
-            .init(title: title, ipodPath: destination.ipodPath,
-                  fileSize: fileSize, durationMs: durationMs),
-            dbid: dbid, itemDBID: itemDBID, timestamp: timestamp)
-
-        try FileManager.default.createDirectory(
-            at: destination.url.deletingLastPathComponent(),
-            withIntermediateDirectories: true)
+        try precheckAdd(title: title)
+        let staged = try copyMedia(file: file, folder: folder, filename: filename,
+                                   onProgress: onCopyProgress)
         do {
-            try copy(file, to: destination.url, totalBytes: byteCount,
-                     onProgress: onCopyProgress)
-            try backUpDatabase()
-            try writer.data.write(to: databaseURL, options: .atomic)
+            return try commit(staged: staged, title: title, durationMs: durationMs,
+                              dbid: dbid, itemDBID: itemDBID, timestamp: timestamp)
         } catch {
-            // The DB never saw the track — don't leave a half-copied or
-            // orphaned media file behind. `copy` is inside the `do` because
-            // it can throw mid-stream too (a full/unplugged volume), and its
-            // partial output must be cleaned up just the same.
-            try? FileManager.default.removeItem(at: destination.url)
+            try? FileManager.default.removeItem(at: staged.url)
             throw error
         }
-        return Video(id: trackID, title: title, ipodPath: destination.ipodPath,
-                     fileSize: fileSize, durationMs: durationMs)
     }
 
     // MARK: - rename / remove

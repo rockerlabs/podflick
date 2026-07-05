@@ -310,6 +310,31 @@ final class SyncModelTests: XCTestCase {
         XCTAssertEqual(model.deviceVideos.count, 4, "the library is untouched")
     }
 
+    func testCleanUpOrphansRefusedWhileUploadInFlight() throws {
+        // With the copy off the write queue (B.17 #1), a just-staged upload
+        // file looks orphaned; orphan cleanup must be refused while an upload
+        // is in flight so it can't delete a file a pending commit references.
+        let volume = try makeVolume("IPOD")
+        let musicDir = volume.appendingPathComponent("iPod_Control/Music/F35")
+        try FileManager.default.createDirectory(
+            at: musicDir, withIntermediateDirectories: true)
+        let orphan = musicDir.appendingPathComponent("XEPQ.m4v")
+        try Data(repeating: 0xEE, count: 500).write(to: orphan)
+
+        let model = makeModel()
+        XCTAssertFalse(model.orphans.isEmpty)
+
+        // A freshly enqueued item makes the queue busy before its worker runs.
+        model.enqueue([volumesRoot.appendingPathComponent("a.mp4")])
+        XCTAssertTrue(model.queueIsBusy)
+
+        model.cleanUpOrphans()
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: orphan.path),
+                      "an in-flight upload must block orphan deletion")
+        XCTAssertTrue(try XCTUnwrap(model.deviceError).contains("upload is in progress"))
+    }
+
     /// The banner's list can go stale between scan and click; entries
     /// that are no longer orphans by delete time (here: file already
     /// gone) must be skipped silently, not surfaced as errors.

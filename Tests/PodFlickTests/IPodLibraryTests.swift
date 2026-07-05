@@ -145,6 +145,44 @@ final class IPodLibraryTests: XCTestCase {
         XCTAssertEqual(try library.videos().count, 5)
     }
 
+    func testCopyMediaStagesFileWithoutTouchingDB() throws {
+        // Phase 1 must not write the DB — that is what lets it run off the
+        // write queue (B.17 #1). The splice happens only in `commit`.
+        let source = try makeSourceFile()
+        let dbBeforeCopy = try onDeviceDB
+
+        let staged = try library.copyMedia(file: source, folder: "F07",
+                                           filename: "TEST.m4v")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staged.url.path))
+        XCTAssertEqual(staged.ipodPath, ":iPod_Control:Music:F07:TEST.m4v")
+        XCTAssertEqual(try onDeviceDB, dbBeforeCopy, "copy must not touch the DB")
+        XCTAssertTrue(backups.isEmpty, "no backup before the splice")
+
+        let video = try library.commit(staged: staged, title: "two-phase",
+                                       durationMs: 1_000, dbid: dbid,
+                                       itemDBID: itemDBID, timestamp: timestamp)
+        XCTAssertEqual(video.ipodPath, staged.ipodPath)
+        XCTAssertEqual(video.fileSize, staged.fileSize)
+        XCTAssertTrue(try library.videos().contains { $0.id == video.id })
+        XCTAssertFalse(backups.isEmpty, "commit backs up before writing")
+    }
+
+    func testCommitFailureLeavesStagedFileForCaller() throws {
+        // commit does NOT own the staged file: on a failed splice the caller
+        // (SyncModel) removes it. Here an already-present title trips commit's
+        // authoritative duplicate check.
+        let source = try makeSourceFile()
+        let staged = try library.copyMedia(file: source, folder: "F07",
+                                           filename: "TEST.m4v")
+        XCTAssertThrowsError(try library.commit(
+            staged: staged, title: "Sample Video 4", durationMs: 1_000)) { error in
+            XCTAssertEqual(error as? IPodLibrary.LibraryError,
+                           .duplicateTitle("Sample Video 4"))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staged.url.path),
+                      "commit leaves the staged file for the caller to clean up")
+    }
+
     func testAddWithRandomPlacementFollowsReferenceNaming() throws {
         let source = try makeSourceFile()
         let video = try library.add(file: source, title: "random spot",
@@ -197,7 +235,11 @@ final class IPodLibraryTests: XCTestCase {
         let source = try makeSourceFile()
         XCTAssertThrowsError(try library.add(
             file: source, title: "orphan", durationMs: 1_000,
-            folder: "F07", filename: "TEST.m4v"))
+            folder: "F07", filename: "TEST.m4v")) { error in
+            // Must be the pre-copy guard, not a post-copy writer failure — the
+            // error identity pins that it failed BEFORE any bytes were copied.
+            XCTAssertEqual(error as? IPodLibrary.LibraryError, .cannotAddToEmptyLibrary)
+        }
         XCTAssertFalse(FileManager.default.fileExists(
             atPath: volume.appendingPathComponent("iPod_Control/Music/F07/TEST.m4v").path))
         XCTAssertEqual(try onDeviceDB, writer.data)
