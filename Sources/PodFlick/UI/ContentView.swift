@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// The app's own brand mark — a media item dropping onto a device tray — used
-/// wherever the UI needs a device glyph, in place of Apple's "ipod" SF Symbol,
-/// so PodFlick ships no Apple product artwork or trade dress. Vector-drawn so it
-/// stays crisp at any size; mirrors `Design/icons/podflick-menubar.svg`.
+/// The app's own brand mark — media streams funneled down into a device tray —
+/// used wherever the UI needs a device glyph, in place of Apple's "ipod" SF
+/// Symbol, so PodFlick ships no Apple product artwork or trade dress. Vector-
+/// drawn so it stays crisp at any size; a monochrome rendering of the app icon
+/// `Design/icons/podflick-icon.svg` (coordinates mapped from its 1024 grid to 24).
 struct BrandGlyph: View {
     var color: Color = .primary
 
@@ -11,16 +12,44 @@ struct BrandGlyph: View {
         Canvas { ctx, size in
             let s = min(size.width, size.height) / 24
             func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { .init(x: x * s, y: y * s) }
-            let line = StrokeStyle(lineWidth: 2.2 * s, lineCap: .round, lineJoin: .round)
-            var stem = Path()
-            stem.move(to: pt(12, 3.6)); stem.addLine(to: pt(12, 11.4))
-            var chevron = Path()
-            chevron.move(to: pt(8.2, 8)); chevron.addLine(to: pt(12, 12)); chevron.addLine(to: pt(15.8, 8))
-            ctx.stroke(stem, with: .color(color), style: line)
-            ctx.stroke(chevron, with: .color(color), style: line)
-            let bar = Path(roundedRect: .init(x: 5 * s, y: 15.4 * s, width: 14 * s, height: 4.4 * s),
-                           cornerRadius: 2.2 * s)
-            ctx.fill(bar, with: .color(color))
+            func rrect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ r: CGFloat) -> Path {
+                Path(roundedRect: .init(x: x * s, y: y * s, width: w * s, height: h * s),
+                     cornerRadius: r * s)
+            }
+            // A downward funnel with soft corners. Rounded from a slightly
+            // enlarged triangle so the corners are gentle AND the mouth stays
+            // wide enough to meet the bars — all in the fill outline itself, with
+            // no stroke (a same-color stroke reads as an outline at small sizes).
+            let a = pt(4.3, 8.92), b = pt(19.75, 8.92), c = pt(12.02, 18.5)
+            let funnelPath = CGMutablePath()
+            funnelPath.move(to: CGPoint(x: (a.x + b.x) / 2, y: a.y))
+            funnelPath.addArc(tangent1End: b, tangent2End: c, radius: 0.7 * s)
+            funnelPath.addArc(tangent1End: c, tangent2End: a, radius: 0.7 * s)
+            funnelPath.addArc(tangent1End: a, tangent2End: b, radius: 0.7 * s)
+            funnelPath.closeSubpath()
+            let funnel = Path(funnelPath)
+
+            // Build the whole mark as one opaque-white silhouette first, so its
+            // overlapping parts (funnel tip under the tray, bars over the funnel
+            // mouth) never compound — which they would if `color` is translucent,
+            // as .secondary is. The silhouette is recolored in a single pass below.
+            let bars: [(CGFloat, CGFloat, CGFloat)] = [   // x, top-y, height
+                (5.69, 5.96, 3.92), (9.43, 1.00, 3.51), (9.43, 5.96, 3.92),
+                (13.16, 3.41, 3.64), (16.90, 2.32, 1.82), (16.90, 6.79, 3.10),
+            ]
+            for (x, y, h) in bars {
+                ctx.fill(rrect(x, y, 1.46, h, 0.73), with: .color(.white))
+            }
+            ctx.fill(funnel, with: .color(.white))
+            ctx.fill(rrect(3.55, 16.63, 16.94, 5.38, 1.37), with: .color(.white))
+
+            // Cut the slot through the tray.
+            ctx.blendMode = .destinationOut
+            ctx.fill(rrect(9.74, 18.54, 4.55, 0.73, 0.36), with: .color(.black))
+
+            // Recolor the silhouette uniformly, preserving its alpha (and the slot).
+            ctx.blendMode = .sourceIn
+            ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(color))
         }
     }
 }
