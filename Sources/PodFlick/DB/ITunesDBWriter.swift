@@ -157,10 +157,10 @@ struct ITunesDBWriter {
         guard let donor = db.masterPlaylists.first else {
             throw WriteError(message: "DB has no master playlist to clone from")
         }
-        let sections = db.sections.filter { $0.type == 2 || $0.type == 3 }
-        guard !sections.isEmpty else {
-            throw WriteError(message: "DB has no playlist section")
-        }
+        // Splice into each section that holds a master copy (the donor's peers),
+        // not merely every type-2/3 section — so an atypical playlist-less
+        // section never receives a stray manual playlist.
+        let sections = db.masterPlaylists.map(\.section)
         // Resolve each track to its dbid (the mhip carries the track's dbid).
         let items = try trackIDs.map { (id: $0, dbid: try track(withID: $0).dbid) }
 
@@ -214,9 +214,15 @@ struct ITunesDBWriter {
         var settings = Data()
         var keptMhods = 0
         var cursor = donor.offset + headerSize
+        let mhodLimit = donor.offset + donor.totalSize   // stay inside the mhyp
         for _ in 0..<Int(try r.u32(donor.offset + 12)) {
             try r.expectMagic("mhod", at: cursor)
             let total = Int(try r.u32(cursor + 8))
+            // Match the parser's per-parent discipline: a mhod that overruns
+            // its mhyp fails loudly rather than reading into the mhips beyond.
+            guard total >= 16, cursor + total <= mhodLimit else {
+                throw WriteError(message: "donor mhod overruns its mhyp")
+            }
             switch try r.u32(cursor + 12) {
             case 100, 102:
                 settings.append(data.subdata(in: cursor ..< cursor + total))
