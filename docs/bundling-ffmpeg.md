@@ -5,6 +5,11 @@ staying **LGPL-only** (see the B.15 decision in `CLAUDE.md`: path A — LGPL
 ffmpeg + Apple VideoToolbox encoder, ffmpeg exec'd as a separate binary so it is
 never linked into PodFlick).
 
+> **Shortcut:** `scripts/release.sh` automates steps (3)-(4) below (clean build →
+> embed → sign → notarize → staple → verify). Set `FFMPEG_BIN_DIR` to the dir
+> holding the LGPL ffmpeg/ffprobe and run it from the repo root; `SKIP_NOTARIZE=1`
+> stops after signing. The steps below remain the source of truth it wraps.
+
 The **code** side is done and shipped: `FFmpegTools.locate` prefers
 `PodFlick.app/Contents/Resources/bin/{ffmpeg,ffprobe}` and falls back to the
 session PATH + package-manager prefixes when that directory is absent (a plain
