@@ -66,6 +66,15 @@ targets:
         # Wired into CFBundleShortVersionString/CFBundleVersion above.
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
+      configs:
+        # Hardened runtime is required for Developer ID notarization (B.15 step
+        # 4). Scoped to Release only so Debug builds — which sign with an Apple
+        # Development cert and attach a debugger — aren't burdened by it. The
+        # bundled ffmpeg/ffprobe are exec'd as separate processes, so no runtime
+        # exception entitlements are needed; the final device smoke confirms the
+        # hardened bundle still launches them.
+        Release:
+          ENABLE_HARDENED_RUNTIME: YES
   PodFlickTests:
     type: bundle.unit-test
     platform: macOS
