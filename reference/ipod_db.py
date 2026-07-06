@@ -28,6 +28,11 @@ from pathlib import Path
 
 MAC_EPOCH = 2082844800  # seconds between 1904-01-01 and 1970-01-01
 
+# A real Finder-written iTunesDB, anonymized (track title → "Sample Video 1").
+# The anonymization also re-blessed the two letter-jump bucket bytes (0xC54,
+# 0x16B2) from '0' to 'S' so the fixture stays internally consistent with its
+# own title — Finder buckets an "S…" title under 'S', not '0'. Without that the
+# --selftest byte-diff fails on those two bytes (B.23).
 TEMPLATE_PATH = Path(__file__).parent / 'iTunesDB_finder_dump'
 
 # Order of mhod52 sort fields in the master playlist, as written by Finder.
