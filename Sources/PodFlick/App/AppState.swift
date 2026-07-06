@@ -221,6 +221,9 @@ final class AppState: NSObject, NSMenuDelegate {
             eject.isEnabled = !model.queueIsBusy && !model.isEjecting
         }
         menu.addItem(.separator())
+        // A menu-bar app has no reliably-reachable app menu, so surface the
+        // About panel (which shows the bundle version) from the status menu too.
+        addItem(to: menu, "About PodFlick", #selector(showAbout))
         addItem(to: menu, "Quit PodFlick", #selector(quit))
     }
 
@@ -234,6 +237,7 @@ final class AppState: NSObject, NSMenuDelegate {
 
     @objc private func openMainWindow() { exitBackgroundMode() }
     @objc private func clearFinished() { model.clearFinished() }
+    @objc private func showAbout() { AppState.showAboutPanel() }
     @objc private func quit() { NSApp.terminate(nil) }
 
     /// Eject from the status menu: fire the model's eject and report the
