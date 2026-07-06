@@ -200,6 +200,27 @@ struct IPodLibrary {
         }
     }
 
+    // MARK: - createPlaylist
+
+    /// Creates a manual (non-master) playlist listing `trackIDs`, spliced into
+    /// the on-disk DB with the same backup + atomic-write discipline as the
+    /// other mutations. Returns the new playlist's persistentID; unknown track
+    /// ids throw (via the writer). Playlist names are not deduped — unlike
+    /// track titles they are not the Videos-menu key.
+    @discardableResult
+    func createPlaylist(title: String, trackIDs: [UInt32],
+                        persistentID: UInt64 = ITunesDBWriter.randomDBID(),
+                        timestamp: UInt32 = ITunesDBWriter.macTimestampNow()) throws -> UInt64 {
+        var writer = try ITunesDBWriter(try Data(contentsOf: databaseURL))
+        let pid = try writer.createPlaylist(
+            title: title, trackIDs: trackIDs,
+            persistentID: persistentID, timestamp: timestamp)
+        try backUpDatabase()
+        try writer.data.write(to: databaseURL, options: .atomic)
+        deleteStalePlayCounts()
+        return pid
+    }
+
     /// ":iPod_Control:Music:F16:JHBI.m4v" → file URL on this volume.
     func url(forIPodPath path: String) -> URL {
         volumeURL.appendingPathComponent(Self.relativePath(forIPodPath: path))
