@@ -66,51 +66,115 @@ Sanity-check the result before embedding:
 ./dist/ffmpeg -hide_banner -L | grep -i gpl   # must print nothing / "LGPL"
 ```
 
-## (3) Embed under Contents/Resources/bin/  — code done; wiring at package time
+## (3) Build the Release .app + embed the binaries
 
-App-code lookup already prefers the bundled path (shipped). Two ways to place
-the binaries into the built `.app`:
+App-code lookup already prefers the bundled path (shipped). Build a Release
+`.app`, then post-build-copy the two binaries into it (keeps the blob out of
+git and lets a plain `swift build`/CI stay ffmpeg-free).
 
-- **Post-build copy** (recommended — keeps the built product out of git and lets
-  a plain `swift build`/CI stay ffmpeg-free): after `xcodebuild`, copy the two
-  binaries into `PodFlick.app/Contents/Resources/bin/` as a release-packaging
-  step (a `Makefile`/`release.sh` target, not a source change).
-- **project.yml Copy-Files phase**: add a `Resources/bin/` source folder + a
-  copy phase so xcodegen embeds it. Only do this once the binaries actually
-  exist on disk — wiring a copy phase against a missing path breaks the build,
-  and it would drag the blob into the dev loop.
+**Build unsigned, from a clean tree.** Two gotchas learned the hard way:
 
-Verify placement:
-
-```
-ls -l PodFlick.app/Contents/Resources/bin
-# ffmpeg, ffprobe — both executable
-```
-
-## (4) Sign (hardened runtime) + notarize
-
-The embedded binaries are separate Mach-O executables — each must be signed with
-the hardened runtime **before** the outer `.app` is signed/notarized, or
-Gatekeeper rejects the bundle. Needs a real signing identity: set
-`DEVELOPMENT_TEAM` in the gitignored `Signing.local.xcconfig` (copy it from
-`Signing.xcconfig.template`); `<TEAM_ID>` below is that same 10-char Apple Team
-ID. Current local builds are unsigned.
+- Embedding happens *after* the build and invalidates any signature xcodebuild
+  applied, so build-time signing is wasted — build with
+  `CODE_SIGNING_ALLOWED=NO` and do all signing manually in step (4).
+- Wipe `build/` first. An incremental rebuild leaves a previously-embedded
+  `Contents/Resources/bin/` in place, so a stale ffmpeg can survive into a
+  "fresh" bundle.
 
 ```
-codesign --force --options runtime --timestamp \
-  --sign "Developer ID Application: <NAME> (<TEAM_ID>)" \
-  PodFlick.app/Contents/Resources/bin/ffmpeg \
-  PodFlick.app/Contents/Resources/bin/ffprobe
-
-# then sign the app outermost, staple after notarization
-codesign --force --options runtime --timestamp --deep \
-  --sign "Developer ID Application: <NAME> (<TEAM_ID>)" PodFlick.app
-xcrun notarytool submit PodFlick.zip --keychain-profile <profile> --wait
-xcrun stapler staple PodFlick.app
+cd <repo>
+rm -rf build                       # avoid a stale embedded bin/ surviving
+xcodegen generate                  # after any project.yml change
+xcodebuild -project PodFlick.xcodeproj -scheme PodFlick -configuration Release \
+  -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
 ```
 
-Verify: `codesign --verify --deep --strict PodFlick.app` and
-`spctl -a -vvv --type exec PodFlick.app` (accepted).
+Confirm the bundle is clean (no `bin/` yet), then embed from the LGPL build:
+
+```
+APP="build/Build/Products/Release/PodFlick.app"
+test -e "$APP/Contents/Resources/bin" && echo "STALE — rm -rf build, rebuild" || echo "clean"
+mkdir -p "$APP/Contents/Resources/bin"
+cp <ffmpeg-src>/dist/bin/ffmpeg <ffmpeg-src>/dist/bin/ffprobe "$APP/Contents/Resources/bin/"
+ls -l "$APP/Contents/Resources/bin"   # ffmpeg, ffprobe — both executable, ~20 MB
+```
+
+(On Apple Silicon the linker ad-hoc-signs every Mach-O, so a
+`CODE_SIGNING_ALLOWED=NO` build still shows `Identifier=…` under `codesign -dv`
+— expected; step (4) replaces it with Developer ID.)
+
+## (4) Sign (hardened runtime) + notarize — proven end-to-end 2026-07-06
+
+**Precondition — a Developer ID Application cert.** Notarized *direct*
+distribution (outside the App Store) needs a **Developer ID Application**
+certificate. `Apple Development` and `Apple Distribution` do NOT work
+(Distribution is App-Store-only). Confirm one exists for the release team:
+
+```
+security find-identity -p codesigning -v | grep "Developer ID Application"
+```
+
+If absent, create it in Xcode → Settings → Accounts → (the team) → Manage
+Certificates → + → Developer ID Application (or developer.apple.com →
+Certificates). It must be under the same team as `DEVELOPMENT_TEAM`
+(`<TEAM_ID>`) in the gitignored `Signing.local.xcconfig` (copied from
+`Signing.xcconfig.template`).
+
+`ENABLE_HARDENED_RUNTIME` is set for the Release config in `project.yml`, but
+since we build unsigned and re-sign manually with `--options runtime` below, the
+flag is belt-and-suspenders — the manual sign is what applies it.
+
+**Sign inner binaries first, then the app.** Each embedded Mach-O must carry
+hardened runtime + a secure timestamp *before* the outer `.app` seals them, or
+notarization rejects the bundle. No `--deep` (Apple discourages it — sign nested
+code explicitly) and no entitlements (ffmpeg is exec'd as a child process, never
+loaded into PodFlick, so hardened runtime needs no exception).
+
+```
+APP="build/Build/Products/Release/PodFlick.app"
+IDENTITY="Developer ID Application: <NAME> (<TEAM_ID>)"
+codesign --force --options runtime --timestamp --sign "$IDENTITY" \
+  "$APP/Contents/Resources/bin/ffmpeg" "$APP/Contents/Resources/bin/ffprobe"
+codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+```
+
+Verify hardened runtime landed (`flags=0x10000(runtime)`) and the bundle is
+sound *before* spending a notary round-trip:
+
+```
+codesign -dv --verbose=4 "$APP" 2>&1 | grep -E 'Authority=|TeamIdentifier=|flags='
+codesign --verify --deep --strict --verbose=2 "$APP"    # -> valid on disk
+```
+
+**Notarize.** notarytool authenticates with an **app-specific password**, NOT
+the Apple ID login password (login password → `HTTP 401`). Create one at
+account.apple.com → Sign-In and Security → App-Specific Passwords (it's shown
+once — copy it immediately; you can't view it later, only revoke/recreate).
+
+⚠️ Two-Apple-ID trap: if the Mac is signed into more than one Apple ID on
+different teams, create the app-specific password under — and pass `--apple-id`
+for — the account that owns the *release* Team ID (`<TEAM_ID>`). A password from
+the wrong account also returns `HTTP 401`. (Felt 2026-07-06: a password from the
+other Apple ID on this Mac 401'd until regenerated under the release account.)
+
+```
+# one-time: store creds in the keychain (prompts for the app-specific password)
+xcrun notarytool store-credentials <profile> --apple-id <APPLE_ID_EMAIL> --team-id <TEAM_ID>
+
+# per release: zip, submit (blocks until Apple returns ~1-5 min), staple on success
+ditto -c -k --keepParent "$APP" PodFlick.zip
+xcrun notarytool submit PodFlick.zip --keychain-profile <profile> --wait   # -> status: Accepted
+xcrun stapler staple "$APP"                                                # only if Accepted
+```
+
+If `status: Invalid`, do NOT staple — pull the reason and fix:
+`xcrun notarytool log <submission-id> --keychain-profile <profile>`.
+
+Final gate (offline Gatekeeper check):
+
+```
+spctl -a -vvv --type exec "$APP"    # -> accepted, source=Notarized Developer ID
+```
 
 ## (5) LGPL compliance for the shipped binary
 
@@ -136,5 +200,11 @@ matrix in the release notes.
 
 ## Status
 
-- ✅ (3) code side — `FFmpegTools.locate` bundled-first lookup + tests (this PR).
-- ⏳ (2)(4)(5)(6) — operator-run at release-packaging time, per the steps above.
+- ✅ (3) code side — `FFmpegTools.locate` bundled-first lookup + tests.
+- ✅ (1) hardened runtime wired into `project.yml` Release config (PR #38).
+- ✅ (2) LGPL ffmpeg built (git snapshot N-117162, `--disable-gpl`
+  `--disable-libx264`), **arm64-only** — no universal binary yet (x86_64
+  deferred, so Intel Macs are unsupported until a `lipo`'d build ships).
+- ✅ (3) build + embed + (4) sign + notarize proven end-to-end 2026-07-06.
+- ⏳ (5) LGPL compliance artifacts + README posture, (6) size note,
+  on-device smoke, and release tagging — remaining.
