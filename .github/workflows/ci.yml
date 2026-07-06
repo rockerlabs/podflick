@@ -12,7 +12,10 @@ concurrency:
 
 jobs:
   build-test:
-    runs-on: macos-latest
+    # Pinned, not `macos-latest`: a CI gate must be reproducible, and the
+    # `macos-latest` label migrates to macOS 26 from 2026-06-15, which would
+    # swap the toolchain under us without a code change. Bump deliberately.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
