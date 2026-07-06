@@ -31,7 +31,7 @@ final class ConvertTests: XCTestCase {
             "-level", "1.3",
             "-pix_fmt", "yuv420p",
             "-vf", "scale=320:240:force_original_aspect_ratio=decrease,"
-                 + "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                 + "pad=320:240:(ow-iw)/2:(oh-ih)/2",
             "-b:v", "700k",
             "-maxrate", "768k",
             "-bufsize", "1536k",
@@ -66,7 +66,7 @@ final class ConvertTests: XCTestCase {
         expected[expected.firstIndex(of: "1.3")!] = "3.0"
         expected[expected.firstIndex(where: { $0.hasPrefix("scale=320:240") })!]
             = "scale=640:480:force_original_aspect_ratio=decrease,"
-            + "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+            + "pad=640:480:(ow-iw)/2:(oh-ih)/2"
         expected[expected.firstIndex(of: "700k")!] = "1200k"
         expected[expected.firstIndex(of: "768k")!] = "1500k"
         expected[expected.firstIndex(of: "1536k")!] = "3000k"
