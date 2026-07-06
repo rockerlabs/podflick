@@ -28,7 +28,12 @@ final class SyncPipelineIntegrationTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        try FileManager.default.removeItem(at: volumesRoot)
+        // setUp throws XCTSkip (no ffmpeg) before volumesRoot is assigned, so
+        // guard against nil — force-unwrapping it here turns a clean skip into
+        // a tearDown crash on any machine without ffmpeg (e.g. CI).
+        if let volumesRoot {
+            try FileManager.default.removeItem(at: volumesRoot)
+        }
     }
 
     func testDroppedClipEndsUpConvertedOnVolumeAndInDB() async throws {
