@@ -103,15 +103,31 @@ struct IPodVideoConverter {
             // `-profile:v baseline`/`-level` strictly — a headless probe of
             // both profiles confirms the muxed stream reports Baseline L1.3 /
             // L3.0, not a silently-upgraded Main. Re-proven on real hardware
-            // (2026-07-05): 5G plays .standard; 5.5G plays both profiles —
-            // identical behaviour to the libx264 output it replaces.
+            // (2026-07-05) for landscape sources: 5G plays .standard; 5.5G
+            // plays both profiles. Portrait/odd-aspect sources needed the pad
+            // below — see that note; VideoToolbox's coded-size alignment is the
+            // one behaviour that is NOT identical to the libx264 output.
             "-c:v", "h264_videotoolbox",
             "-profile:v", "baseline",
             "-level", profile.h264Level,
             "-pix_fmt", "yuv420p",
+            // Fit inside the profile box, then PAD back out to its exact,
+            // macroblock-aligned size (320×240 / 640×480 — both 16-divisible),
+            // baking any pillar/letter-box as black. Critical for
+            // h264_videotoolbox: when a fitted dimension is not a multiple of
+            // VideoToolbox's coarse coded-size alignment it codes a wider
+            // macroblock grid and hides the extra columns behind a large SPS
+            // crop rectangle (a 4K-portrait 2160×3840 source fitted to 134×240
+            // was coded 192×240 with a 58 px right crop). The iPod's hardware
+            // H.264 decoder does not honour that crop — it renders the full
+            // coded grid at the wrong stride, the garbled/smeared playback seen
+            // on device. Padding to the fixed box makes coded == display with a
+            // zero crop, the geometry the firmware was built around. libx264
+            // tolerated the old odd sizes (tight 16-align + tiny crop), which
+            // is why B.15.1's landscape re-proof missed this.
             "-vf", "scale=\(profile.maxWidth):\(profile.maxHeight)"
                  + ":force_original_aspect_ratio=decrease,"
-                 + "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                 + "pad=\(profile.maxWidth):\(profile.maxHeight):(ow-iw)/2:(oh-ih)/2",
             "-b:v", profile.videoBitrate,
             "-maxrate", profile.videoMaxrate,
             "-bufsize", profile.videoBufsize,
