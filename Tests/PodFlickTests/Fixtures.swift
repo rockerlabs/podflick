@@ -113,11 +113,11 @@ struct TestClipError: Error {}
 
 /// 1s 320×240 test pattern + 440 Hz tone at `url`, with a source title tag
 /// that must NOT survive conversion. Shared by every ffmpeg-gated test.
-func makeTestClip(tools: FFmpegTools, at url: URL) throws -> URL {
+func makeTestClip(tools: FFmpegTools, at url: URL, size: String = "320x240") throws -> URL {
     let generate = Process()
     generate.executableURL = tools.ffmpeg
     generate.arguments = [
-        "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=30",
+        "-f", "lavfi", "-i", "testsrc=duration=1:size=\(size):rate=30",
         "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
         "-c:v", "libx264", "-c:a", "aac",
         "-metadata", "title=legacy source title",
