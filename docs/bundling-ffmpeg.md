@@ -91,18 +91,20 @@ ls -l PodFlick.app/Contents/Resources/bin
 
 The embedded binaries are separate Mach-O executables — each must be signed with
 the hardened runtime **before** the outer `.app` is signed/notarized, or
-Gatekeeper rejects the bundle. Needs real signing identity
-(`DEVELOPMENT_TEAM = J93H5JCAWM`; current local builds are unsigned).
+Gatekeeper rejects the bundle. Needs a real signing identity: set
+`DEVELOPMENT_TEAM` in the gitignored `Signing.local.xcconfig` (copy it from
+`Signing.xcconfig.template`); `<TEAM_ID>` below is that same 10-char Apple Team
+ID. Current local builds are unsigned.
 
 ```
 codesign --force --options runtime --timestamp \
-  --sign "Developer ID Application: <NAME> (J93H5JCAWM)" \
+  --sign "Developer ID Application: <NAME> (<TEAM_ID>)" \
   PodFlick.app/Contents/Resources/bin/ffmpeg \
   PodFlick.app/Contents/Resources/bin/ffprobe
 
 # then sign the app outermost, staple after notarization
 codesign --force --options runtime --timestamp --deep \
-  --sign "Developer ID Application: <NAME> (J93H5JCAWM)" PodFlick.app
+  --sign "Developer ID Application: <NAME> (<TEAM_ID>)" PodFlick.app
 xcrun notarytool submit PodFlick.zip --keychain-profile <profile> --wait
 xcrun stapler staple PodFlick.app
 ```
