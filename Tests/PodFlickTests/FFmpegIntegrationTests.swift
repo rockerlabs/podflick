@@ -67,6 +67,27 @@ final class FFmpegIntegrationTests: XCTestCase {
         XCTAssertEqual(result.title, "Чистый заголовок")
     }
 
+    /// A portrait (or any non-4:3) source must convert to the profile's exact,
+    /// macroblock-aligned box — pillar/letter-boxed, never an odd fitted size
+    /// that h264_videotoolbox would code wider and hide behind an SPS crop the
+    /// iPod's decoder ignores (the on-device garbling this recipe fixes).
+    func testPortraitSourceIsPaddedToExactProfileBox() async throws {
+        let source = try makeTestClip(
+            tools: tools,
+            at: workDir.appendingPathComponent("portrait.mp4"),
+            size: "540x960")
+        let output = workDir.appendingPathComponent("portrait.m4v")
+        let converter = IPodVideoConverter(tools: tools)
+        let probe = try await converter.probe(source)
+        try await converter.convert(source, to: output, title: "Portrait", probe: probe)
+
+        // Exactly 320×240 (not the ~134×240 fitted size) proves the pad ran;
+        // display == coded here means a zero SPS crop.
+        let result = try await converter.probe(output)
+        XCTAssertEqual(result.width, 320)
+        XCTAssertEqual(result.height, 240)
+    }
+
     func testCancelledConversionThrowsCancellationError() async throws {
         let source = try makeSourceClip()
         let output = workDir.appendingPathComponent("cancelled.m4v")
