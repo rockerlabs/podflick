@@ -367,4 +367,34 @@ final class IPodLibraryTests: XCTestCase {
         XCTAssertThrowsError(try library.remove(trackID: 999_999))
         XCTAssertTrue(backups.isEmpty, "failed mutations must not write backups")
     }
+
+    // MARK: - createPlaylist
+
+    func testCreatePlaylistWritesManualPlaylistAndBacksUp() throws {
+        let chosen = Array(try library.videos().map(\.id).prefix(2))
+
+        let pid = try library.createPlaylist(
+            title: "Sample Playlist", trackIDs: chosen,
+            persistentID: 0x1234_5678_90AB_CDEF, timestamp: timestamp)
+        XCTAssertEqual(pid, 0x1234_5678_90AB_CDEF)
+
+        // The on-disk DB now carries the manual playlist in both sections,
+        // with the master playlists and tracks untouched, and one backup.
+        let db = try ITunesDB.parse(try onDeviceDB)
+        let manual = db.playlists.filter { !$0.isMaster && !$0.isSmart }
+        XCTAssertEqual(manual.count, 2)
+        XCTAssertTrue(manual.allSatisfy {
+            $0.title == "Sample Playlist" && $0.items.map(\.trackID) == chosen })
+        XCTAssertEqual(db.tracks.count, 4)
+        XCTAssertEqual(db.masterPlaylists.count, 2)
+        XCTAssertEqual(backups.count, 1)
+    }
+
+    func testCreatePlaylistWithUnknownTrackThrowsAndDoesNotWrite() throws {
+        let before = try onDeviceDB
+        XCTAssertThrowsError(
+            try library.createPlaylist(title: "x", trackIDs: [999_999]))
+        XCTAssertEqual(try onDeviceDB, before, "failed create must not write")
+        XCTAssertTrue(backups.isEmpty)
+    }
 }
