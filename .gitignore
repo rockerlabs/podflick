@@ -18,3 +18,7 @@ xcuserdata/
 
 # Local signing (team id lives here, per-machine)
 Signing.local.xcconfig
+
+# Python (reference/ selftest bytecode)
+__pycache__/
+*.pyc

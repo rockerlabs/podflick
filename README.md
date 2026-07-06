@@ -56,11 +56,18 @@ Full hardware smoke steps: [docs/smoke-service-transfer.md](docs/smoke-service-t
 
 ## License
 
-PodFlick is released under the [MIT License](LICENSE).
+PodFlick's own code is released under the [MIT License](LICENSE).
 
-It does **not** bundle ffmpeg — it shells out to an ffmpeg/ffprobe you install
-yourself (`brew install ffmpeg`), so ffmpeg's own license (GPL/LGPL depending
-on the build) stays with your copy of ffmpeg and does not extend to PodFlick.
+**ffmpeg.** PodFlick shells out to `ffmpeg`/`ffprobe` as separate child
+processes — it never links them in, so its own source stays MIT either way:
+
+- **Source checkouts / Homebrew dev builds** do not bundle ffmpeg; they use an
+  ffmpeg you install yourself (`brew install ffmpeg`), whose license stays with
+  your copy.
+- **Notarized release builds** bundle an **LGPL v2.1** ffmpeg/ffprobe (built
+  with no GPL or non-free components). The compliance package — license text,
+  the exact source revision, the build/configure line, and a written offer for
+  the corresponding source — is in [`licenses/ffmpeg/`](licenses/ffmpeg/).
 
 The iTunesDB read/write layer is an independent, byte-level reverse engineering
 of the on-device format (see [docs/itunesdb-format.md](docs/itunesdb-format.md));
