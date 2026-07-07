@@ -1,9 +1,24 @@
 name: CI
 
 on:
+  # Skip CI when a change touches only docs/licenses/images — nothing there
+  # affects the build, tests, or the reference selftest. Any code path
+  # (.swift, project.yml, reference/*.py, scripts/*, this workflow) still runs.
+  # Safe here because the repo has no required-status branch protection (free
+  # private plan); revisit with an always-green skip job once that's enabled.
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'licenses/**'
+      - '**/*.png'
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'licenses/**'
+      - '**/*.png'
 
 # One run per ref; a new push cancels the in-flight run for the same branch/PR.
 concurrency:
