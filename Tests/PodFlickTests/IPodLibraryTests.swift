@@ -238,12 +238,15 @@ final class IPodLibraryTests: XCTestCase {
     }
 
     func testAddFailsFastWithoutCopyWhenDBHasNoDonor() throws {
-        // A DB whose only track was removed has no donor to clone — the
-        // splice must fail BEFORE any bytes are copied to the volume.
+        // A DB whose only track was removed has no donor to clone, and with
+        // no seed donor DB configured (the tests host in PodFlick.app, whose
+        // bundle carries one — disable it) the splice must fail BEFORE any
+        // bytes are copied to the volume.
         var writer = try ITunesDBWriter(try fixture("iTunesDB.single-video"))
         let onlyTrack = try XCTUnwrap(writer.db.tracks.first)
         try writer.remove(trackID: onlyTrack.id)
         try install(database: writer.data, onVolume: volume)
+        library.seedDatabaseURL = nil
 
         let source = try makeSourceFile()
         XCTAssertThrowsError(try library.add(
@@ -256,6 +259,36 @@ final class IPodLibraryTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(
             atPath: volume.appendingPathComponent("iPod_Control/Music/F07/TEST.m4v").path))
         XCTAssertEqual(try onDeviceDB, writer.data)
+    }
+
+    func testAddSeedsEmptiedLibraryFromSeedDonorDB() throws {
+        // The library-wipe shape end-to-end: every video deleted, then one
+        // uploaded, with the bundled seed donor configured (as in the app,
+        // where the golden fixture ships as a bundle resource).
+        var writer = try ITunesDBWriter(try fixture("iTunesDB.single-video"))
+        try writer.remove(trackID: try XCTUnwrap(writer.db.tracks.first).id)
+        try install(database: writer.data, onVolume: volume)
+        library.seedDatabaseURL = fixtureURL("iTunesDB.single-video")
+
+        let source = try makeSourceFile()
+        let video = try library.add(
+            file: source, title: "first after wipe", durationMs: 1_000,
+            folder: "F07", filename: "TEST.m4v",
+            dbid: dbid, itemDBID: itemDBID, timestamp: timestamp)
+
+        XCTAssertEqual(try library.videos().map(\.title), ["first after wipe"])
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: volume.appendingPathComponent("iPod_Control/Music/F07/TEST.m4v").path))
+        XCTAssertEqual(backups.count, 1)
+
+        // The library writes exactly the writer's bytes for the same inputs.
+        var expected = try ITunesDBWriter(writer.data)
+        try expected.add(
+            .init(title: "first after wipe", ipodPath: video.ipodPath,
+                  fileSize: video.fileSize, durationMs: 1_000),
+            seed: try ITunesDBWriter.SeedDonor(try fixture("iTunesDB.single-video")),
+            dbid: dbid, itemDBID: itemDBID, timestamp: timestamp)
+        XCTAssertEqual(try onDeviceDB, expected.data)
     }
 
     func testAddFailsCleanlyWhenCopyThrows() throws {

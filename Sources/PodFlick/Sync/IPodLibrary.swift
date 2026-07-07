@@ -16,6 +16,13 @@ struct IPodLibrary {
 
     let volumeURL: URL
 
+    /// The bundled donor DB (the golden single-video fixture) that seeds a
+    /// library with no donors of its own — an iPod whose every video was
+    /// deleted. nil (no such resource, the unit-test default) restores the
+    /// old behavior: adds to an empty library are rejected.
+    var seedDatabaseURL: URL? = Bundle.main.url(
+        forResource: "iTunesDB", withExtension: "single-video")
+
     var databaseURL: URL { IPodDevice.databaseURL(onVolume: volumeURL) }
 
     enum LibraryError: Error, Equatable, CustomStringConvertible {
@@ -26,8 +33,12 @@ struct IPodLibrary {
         case fileTooLarge(Int64)
         case noFreeMediaName
         /// The donor-clone splice needs an existing track + playlist entry to
-        /// clone; a library with none can't be seeded by PodFlick.
+        /// clone; without a seed donor DB a library with none can't be seeded.
         case cannotAddToEmptyLibrary
+        /// No master playlist at all — there is nothing to splice a playlist
+        /// entry into, and PodFlick never builds playlist structure from
+        /// scratch. Only a Finder/iTunes sync can rebuild one.
+        case noMasterPlaylist
 
         var description: String {
             switch self {
@@ -40,6 +51,9 @@ struct IPodLibrary {
             case .cannotAddToEmptyLibrary:
                 return "this iPod has no videos yet — add the first one with "
                      + "Finder/iTunes, then PodFlick can add more"
+            case .noMasterPlaylist:
+                return "this iPod's database has no master playlist — sync it "
+                     + "once with Finder/iTunes to rebuild it"
             }
         }
     }
@@ -82,14 +96,35 @@ struct IPodLibrary {
             throw LibraryError.duplicateTitle(title)
         }
         // The donor-clone splice needs a track and — since it clones into
-        // EVERY master-playlist copy — an mhip to clone in each. Reject an
+        // EVERY master-playlist copy — an mhip to clone in each. An emptied
+        // library supplies neither, but the bundled seed donor DB can; only
+        // a DB with no master playlist at all stays unfixable. Reject an
         // unseedable DB BEFORE copying gigabytes (matches commit's per-master
         // requirement; commit re-validates authoritatively via ITunesDBWriter).
-        guard !db.tracks.isEmpty,
-              !db.masterPlaylists.isEmpty,
-              db.masterPlaylists.allSatisfy({ !$0.items.isEmpty }) else {
+        guard !db.masterPlaylists.isEmpty else {
+            throw LibraryError.noMasterPlaylist
+        }
+        if needsSeed(db), seedDatabaseURL == nil {
             throw LibraryError.cannotAddToEmptyLibrary
         }
+    }
+
+    /// True when the DB cannot supply its own donors: no track to clone, or
+    /// a master-playlist copy with no mhip left (both after "every video was
+    /// deleted", the state a demo wipe leaves behind).
+    private func needsSeed(_ db: ITunesDB) -> Bool {
+        db.tracks.isEmpty || db.masterPlaylists.contains { $0.items.isEmpty }
+    }
+
+    /// Loads the bundled donor DB when the on-device DB needs seeding; nil
+    /// when it can donate to itself. Reading the 16 KB resource per commit is
+    /// noise next to the multi-GB media copy that precedes it.
+    private func seedDonor(for db: ITunesDB) throws -> ITunesDBWriter.SeedDonor? {
+        guard needsSeed(db) else { return nil }
+        guard let url = seedDatabaseURL else {
+            throw LibraryError.cannotAddToEmptyLibrary
+        }
+        return try ITunesDBWriter.SeedDonor(try Data(contentsOf: url))
     }
 
     /// Phase 1 — no DB access, so the queued upload runs it OFF the write
@@ -138,6 +173,7 @@ struct IPodLibrary {
         let trackID = try writer.add(
             .init(title: title, ipodPath: staged.ipodPath,
                   fileSize: staged.fileSize, durationMs: durationMs),
+            seed: try seedDonor(for: writer.db),
             dbid: dbid, itemDBID: itemDBID, timestamp: timestamp)
         try backUpDatabase()
         try writer.data.write(to: databaseURL, options: .atomic)

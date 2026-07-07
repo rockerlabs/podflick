@@ -5,11 +5,12 @@ import Foundation
 /// reference/ipod_sync_v3.py.
 ///
 /// THE core invariant (docs/itunesdb-format.md): never regenerate the DB,
-/// never renumber ids. New records are clones of proven-visible donors from
-/// the CURRENT database with only per-file fields swapped; every splice
-/// bumps the size field of each enclosing record (mhbd, mhsd, mhit/mhyp)
-/// and the owning list's count. mhod52/53 indexes, albums and smart
-/// playlists are never touched.
+/// never renumber ids. New records are clones of proven-visible donors with
+/// only per-file fields swapped — from the CURRENT database, or, when it
+/// has none left (a library emptied of videos), from a `SeedDonor` database
+/// that is itself firmware-accepted; every splice bumps the size field of
+/// each enclosing record (mhbd, mhsd, mhit/mhyp) and the owning list's
+/// count. mhod52/53 indexes, albums and smart playlists are never touched.
 ///
 /// The writer re-parses after every mutation, so the strict full-coverage
 /// parser doubles as a structural self-check of each splice, and `db`
@@ -38,6 +39,21 @@ struct ITunesDBWriter {
         var durationMs: UInt32
     }
 
+    /// A donor database for seeding an emptied library: when the target DB
+    /// has no track (or a master-playlist copy has no mhip) there is nothing
+    /// left to clone, so `add` takes the missing donors from here instead.
+    /// The app passes the bundled golden fixture — a real, firmware-accepted
+    /// database of the same layout as every Finder-written iPod 5G/5.5G DB.
+    struct SeedDonor {
+        let data: Data
+        let db: ITunesDB
+
+        init(_ data: Data) throws {
+            self.data = data.rebasedToZero
+            self.db = try ITunesDB.parse(self.data)
+        }
+    }
+
     static func randomDBID() -> UInt64 {
         // 63-bit nonzero, matching the reference implementation.
         UInt64.random(in: 0..<(1 << 63)) | 1
@@ -52,19 +68,34 @@ struct ITunesDBWriter {
     /// Splices a cloned mhit into the track list and a cloned mhip into each
     /// master-playlist copy. Returns the new track id (= max used id + 2;
     /// the playlist item id is +3, per the proven Finder-counter pattern).
+    /// When this DB has no donor of its own (an emptied library), the donor
+    /// blobs come from `seed` instead — the splice targets stay this DB's.
     /// dbid/itemDBID/timestamp are injectable so tests are deterministic.
     @discardableResult
     mutating func add(_ new: NewTrack,
+                      seed: SeedDonor? = nil,
                       dbid: UInt64 = randomDBID(),
                       itemDBID: UInt64 = randomDBID(),
                       timestamp: UInt32 = macTimestampNow()) throws -> UInt32 {
         // Donor: prefer a track with album id 0 — the proven minimal pattern.
-        guard let donor = db.tracks.first(where: { $0.albumID == 0 })
-                ?? db.tracks.first else {
+        let donor: (track: ITunesDB.Track, source: Data)
+        if let own = db.tracks.first(where: { $0.albumID == 0 })
+                ?? db.tracks.first {
+            donor = (own, data)
+        } else if let seed,
+                  let seeded = seed.db.tracks.first(where: { $0.albumID == 0 })
+                        ?? seed.db.tracks.first {
+            donor = (seeded, seed.data)
+        } else {
             throw WriteError(message: "DB has no track to clone from")
         }
         guard !db.masterPlaylists.isEmpty else {
             throw WriteError(message: "DB has no master playlist")
+        }
+        // The splice inserts into THIS DB's track section — donor.track's own
+        // section may live in the seed data.
+        guard let trackSection = db.sections.first(where: { $0.type == 1 }) else {
+            throw WriteError(message: "DB has no track section")
         }
 
         let base = maxUsedID()
@@ -76,18 +107,29 @@ struct ITunesDBWriter {
         let trackID = base + 2
         let itemID = base + 3
 
-        let trackListEnd = donor.section.offset + donor.section.totalSize
+        let trackListEnd = trackSection.offset + trackSection.totalSize
         var edits = [Edit(
             range: trackListEnd..<trackListEnd,
-            replacement: try cloneTrack(donor: donor, id: trackID, dbid: dbid,
+            replacement: try cloneTrack(donor: donor.track, in: donor.source,
+                                        id: trackID, dbid: dbid,
                                         new: new, timestamp: timestamp),
-            sizeBumpOffsets: [donor.section.offset + 8],
-            countBump: (offset: donor.section.listOffset + 8, delta: 1))]
+            sizeBumpOffsets: [trackSection.offset + 8],
+            countBump: (offset: trackSection.listOffset + 8, delta: 1))]
         for master in db.masterPlaylists {
+            let item: (donor: ITunesDB.PlaylistItem, source: Data)
+            if let own = master.items.last {
+                item = (own, data)
+            } else if let seed, let seeded = seed.db.masterPlaylists
+                        .compactMap(\.items.last).first {
+                item = (seeded, seed.data)
+            } else {
+                throw WriteError(message: "master playlist has no mhip to clone from")
+            }
             let masterEnd = master.offset + master.totalSize
             edits.append(Edit(
                 range: masterEnd..<masterEnd,
-                replacement: try cloneItem(in: master, trackID: trackID,
+                replacement: try cloneItem(donor: item.donor, in: item.source,
+                                           trackID: trackID,
                                            itemID: itemID, trackDBID: dbid,
                                            itemDBID: itemDBID,
                                            timestamp: timestamp),
@@ -191,7 +233,10 @@ struct ITunesDBWriter {
 
     // MARK: - Donor cloning
 
-    private func cloneTrack(donor: ITunesDB.Track, id: UInt32, dbid: UInt64,
+    /// `source` is the data the donor's offsets index into: this DB's own
+    /// bytes, or the seed donor DB's when seeding an emptied library.
+    private func cloneTrack(donor: ITunesDB.Track, in source: Data,
+                            id: UInt32, dbid: UInt64,
                             new: NewTrack, timestamp: UInt32) throws -> Data {
         guard let kindRange = donor.kindMhodRange else {
             throw WriteError(message: "donor track \(donor.id) has no filetype mhod")
@@ -201,9 +246,9 @@ struct ITunesDBWriter {
             throw WriteError(message: "donor mhit header 0x\(String(donor.headerSize, radix: 16)) too small to clone")
         }
         let children = try Self.stringMhod(type: 1, new.title)
-                     + data.subdata(in: kindRange)
+                     + source.subdata(in: kindRange)
                      + Self.stringMhod(type: 2, new.ipodPath)
-        var header = data.subdata(in: donor.offset ..< donor.offset + donor.headerSize)
+        var header = source.subdata(in: donor.offset ..< donor.offset + donor.headerSize)
         guard let cloneTotal = UInt32(exactly: donor.headerSize + children.count) else {
             throw WriteError(message:
                 "cloned mhit total \(donor.headerSize + children.count) overflows u32")
@@ -225,19 +270,19 @@ struct ITunesDBWriter {
         return header + children
     }
 
-    private func cloneItem(in master: ITunesDB.Playlist, trackID: UInt32,
+    /// `source` is the data the donor's offsets index into: this DB's own
+    /// bytes, or the seed donor DB's when the master copy has no mhip left.
+    private func cloneItem(donor: ITunesDB.PlaylistItem, in source: Data,
+                           trackID: UInt32,
                            itemID: UInt32, trackDBID: UInt64,
                            itemDBID: UInt64, timestamp: UInt32) throws -> Data {
-        guard let donor = master.items.last else {
-            throw WriteError(message: "master playlist has no mhip to clone from")
-        }
-        let headerSize = Int(try Reader(data).u32(donor.offset + 4))
+        let headerSize = Int(try Reader(source).u32(donor.offset + 4))
         // Patched fields end at 0x44; the child mhod100's position value
         // sits at header + 0x18.
         guard headerSize >= 0x44, headerSize + 0x1C <= donor.totalSize else {
             throw WriteError(message: "donor mhip layout too small to clone")
         }
-        var blob = data.subdata(in: donor.offset ..< donor.offset + donor.totalSize)
+        var blob = source.subdata(in: donor.offset ..< donor.offset + donor.totalSize)
         blob.putU32(itemID, at: 0x14)
         blob.putU32(trackID, at: 0x18)
         blob.putU32(timestamp, at: 0x1C)
