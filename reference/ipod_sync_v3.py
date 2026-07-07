@@ -26,7 +26,7 @@ Usage:
     ./ipod_sync_v3.py remove  <ipod_root> <title substring>
 
 Every mutating command backs up the current DB to
-device_backups/ on the Samsung T5 if present, else next to the DB.
+~/.podflick/device_backups/ if present, else next to the DB.
 """
 import random
 import shutil
