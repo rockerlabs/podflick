@@ -10,6 +10,28 @@ never linked into PodFlick).
 > holding the LGPL ffmpeg/ffprobe and run it from the repo root; `SKIP_NOTARIZE=1`
 > stops after signing. The steps below remain the source of truth it wraps.
 
+## Alternative: a no-bundle (bring-your-own-ffmpeg) release
+
+Everything below produces the **self-contained** release (ffmpeg bundled). You
+can also ship a **lighter, no-bundle** build that carries no ffmpeg and relies on
+one the user installs (`brew install ffmpeg`) — `FFmpegTools.locate` already
+falls back to the session `PATH` + Homebrew prefixes when the bundled dir is
+absent. Trade-off: a much smaller download and no ffmpeg build / LGPL package to
+maintain, but it is **not** self-contained (the user must have ffmpeg on `PATH`).
+
+Because nothing is embedded, there are no inner binaries to sign and no library-
+validation concern — just build, sign the app, notarize, staple:
+
+```
+# omit FFMPEG_BIN_DIR entirely → release.sh builds a no-bundle .app
+./scripts/release.sh
+```
+
+It runs the same build → sign (app only) → notarize → staple → Gatekeeper path,
+skipping the embed step. Ship this as a clearly-labelled "requires ffmpeg" asset
+(or the basis for a Homebrew cask). Steps (2) and (5) — building LGPL ffmpeg and
+its compliance package — do **not** apply to a no-bundle build.
+
 The **code** side is done and shipped: `FFmpegTools.locate` prefers
 `PodFlick.app/Contents/Resources/bin/{ffmpeg,ffprobe}` and falls back to the
 session PATH + package-manager prefixes when that directory is absent (a plain
