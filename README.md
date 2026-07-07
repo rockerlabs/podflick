@@ -67,6 +67,38 @@ notification.
 
 Full hardware smoke steps: [docs/smoke-service-transfer.md](docs/smoke-service-transfer.md).
 
+## Known issues & limitations
+
+These are device- and platform-level behaviors PodFlick can't change, plus a
+couple of troubleshooting notes. None of them are bugs in the transfer itself.
+
+- **A brand-new video can play black on its first open.** A just-transferred clip
+  may show a black screen on its *very first* launch — no response to buttons for
+  ~10–15 s, then it drops back to the menu. Play it a second time and it works
+  normally (both 320×240 and 640×480). This is a pre-existing iPod firmware quirk
+  (first-open indexing/thumbnailing) seen on both 5G and 5.5G — it happens with
+  videos made by other tools too, not just PodFlick.
+
+- **Model / Firmware / Serial can show blank in the app.** iPods that have been
+  restored or set up for Rockbox often have an empty (0-byte) `Device/SysInfo`,
+  so those header fields stay blank. Format and capacity still display. This
+  reflects the device, not a PodFlick problem.
+
+- **Play PodFlick's videos from the stock Apple firmware.** Clips are encoded for
+  the classic firmware's hardware decoder. On a Rockbox dual-boot iPod, browsing
+  and music work under Rockbox, but boot into the original Apple firmware to watch
+  the transferred video.
+
+- **Platform support is narrow.** Apple Silicon (arm64) and macOS 14+ only — Intel
+  Macs aren't supported — and the target device is an iPod Video 5G/5.5G.
+
+- **If the iPod keeps mounting and unmounting (flapping),** try a different USB
+  cable before anything else. A device that mounts for a second, disconnects, and
+  repeats is almost always a bad cable or contact, not PodFlick.
+
+- **No Finder "Transfer to iPod" item?** It only appears once `PodFlick.app` lives
+  in `/Applications` — see [Background transfer](#background-transfer-finder-service--url-scheme).
+
 ## License
 
 PodFlick's own code is released under the [MIT License](LICENSE).
