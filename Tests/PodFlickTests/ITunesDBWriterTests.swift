@@ -96,6 +96,73 @@ final class ITunesDBWriterTests: XCTestCase {
                        original.smartPlaylists.map(\.title))
     }
 
+    // MARK: - seeding an emptied library from a donor DB
+
+    func testAddSeedsEmptiedDatabaseFromDonorDB() throws {
+        // "Every video deleted, then one uploaded" — the state a library
+        // wipe leaves behind: no track to clone, no mhip in either master
+        // copy, only the seed donor can supply them.
+        var writer = try ITunesDBWriter(try fixture("iTunesDB.single-video"))
+        try writer.remove(trackID: try XCTUnwrap(writer.db.tracks.first).id)
+        XCTAssertTrue(writer.db.tracks.isEmpty)
+        XCTAssertTrue(writer.db.masterPlaylists.allSatisfy(\.items.isEmpty))
+        let emptied = writer.data
+
+        let seed = try ITunesDBWriter.SeedDonor(try fixture("iTunesDB.single-video"))
+        let trackID = try writer.add(newVideo, seed: seed, dbid: dbid,
+                                     itemDBID: itemDBID, timestamp: timestamp)
+
+        let db = writer.db      // strictly re-parsed after the splice
+        XCTAssertEqual(db.tracks.count, 1)
+        let added = try XCTUnwrap(db.tracks.first)
+        XCTAssertEqual(added.id, trackID)
+        XCTAssertEqual(added.title, newVideo.title)
+        XCTAssertEqual(added.path, newVideo.ipodPath)
+        XCTAssertEqual(added.fileSize, newVideo.fileSize)
+        XCTAssertEqual(added.durationMs, newVideo.durationMs)
+        XCTAssertEqual(added.dbid, dbid)
+        XCTAssertEqual(added.mediaType, 2)      // the seed donor is a movie
+        XCTAssertEqual(added.albumID, 0, "clone must not reference an album")
+        XCTAssertEqual(db.masterPlaylists.count, 2)
+        for master in db.masterPlaylists {
+            XCTAssertEqual(master.items.map(\.trackID), [trackID])
+            XCTAssertEqual(master.items.first?.itemID, trackID + 1)
+            XCTAssertEqual(master.items.first?.trackDBID, dbid)
+        }
+
+        // A seeded add stays a reversible splice like any other.
+        try writer.remove(trackID: trackID)
+        XCTAssertEqual(writer.data, emptied)
+    }
+
+    func testAddSeedsAcrossDatabases() throws {
+        // The donor DB is a DIFFERENT database than the one being seeded —
+        // the app's real shape (bundled fixture donor, on-device target).
+        var writer = try ITunesDBWriter(try fixture("iTunesDB.four-videos"))
+        for track in writer.db.tracks { try writer.remove(trackID: track.id) }
+        XCTAssertTrue(writer.db.tracks.isEmpty)
+
+        let seed = try ITunesDBWriter.SeedDonor(try fixture("iTunesDB.single-video"))
+        let trackID = try writer.add(newVideo, seed: seed, dbid: dbid,
+                                     itemDBID: itemDBID, timestamp: timestamp)
+
+        XCTAssertEqual(writer.db.tracks.map(\.title), [newVideo.title])
+        for master in writer.db.masterPlaylists {
+            XCTAssertEqual(master.items.map(\.trackID), [trackID])
+        }
+    }
+
+    func testAddWithoutSeedOnEmptiedDatabaseThrows() throws {
+        var writer = try ITunesDBWriter(try fixture("iTunesDB.single-video"))
+        try writer.remove(trackID: try XCTUnwrap(writer.db.tracks.first).id)
+        let emptied = writer.data
+
+        XCTAssertThrowsError(try writer.add(newVideo, dbid: dbid,
+                                            itemDBID: itemDBID,
+                                            timestamp: timestamp))
+        XCTAssertEqual(writer.data, emptied, "a failed add must not touch the DB")
+    }
+
     // MARK: - (c) rename patch against the firmware-accepted fixture
 
     func testRenameRoundTripMatchesAcceptedFixture() throws {
