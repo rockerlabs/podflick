@@ -8,14 +8,19 @@ import Foundation
 /// rename splice, the device name via a same-length in-place edit — so the
 /// byte structure and firmware-acceptance are unchanged.
 func fixture(_ name: String) throws -> Data {
+    try Data(contentsOf: fixtureURL(name))
+}
+
+/// The on-disk location of a golden fixture — for tests that hand the file
+/// to code taking a URL (e.g. `IPodLibrary.seedDatabaseURL`).
+func fixtureURL(_ name: String) -> URL {
     // Tests/PodFlickTests/<this file> -> repo root -> reference/fixtures
-    let root = URL(fileURLWithPath: #filePath)
+    URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()   // PodFlickTests
         .deletingLastPathComponent()   // Tests
         .deletingLastPathComponent()   // repo root
-    return try Data(contentsOf: root
         .appendingPathComponent("reference/fixtures")
-        .appendingPathComponent(name))
+        .appendingPathComponent(name)
 }
 
 /// Creates a unique scratch directory for one test; the caller removes it

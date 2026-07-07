@@ -12,6 +12,16 @@ Work toward v2 (on `main`, not yet released).
 - In-app creation of manual (non-master) playlists in the iTunesDB (backend).
 - Settings window (⌘,) with a **Launch at login** toggle, and a **Help** menu.
 
+## [1.0.1] — 2026-07-08
+
+Hotfix release.
+
+### Fixed
+- Adding the first video to an empty iPod now works: PodFlick seeds the
+  device's database from a bundled, firmware-accepted donor template instead
+  of asking for a first Finder/iTunes sync. The device's own playlists and
+  structure are untouched. Device-verified on an iPod 5G. (#70)
+
 ## [1.0] — 2026-07-07
 
 First release. Drag-and-drop video onto a classic iPod (5G/5.5G) from a native
