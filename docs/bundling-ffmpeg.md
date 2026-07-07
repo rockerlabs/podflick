@@ -41,10 +41,21 @@ The build must contain everything the converter and probe actually invoke
 Per-arch build (repeat for `arm64` and, for a universal binary, `x86_64`),
 starting recipe — **verify against the current ffmpeg release before trusting**:
 
+**`--disable-autodetect` is mandatory, not optional.** Without it ffmpeg's
+configure auto-links whatever it finds on the *build* host — on a Homebrew Mac
+that pulls in `libxcb*`, `libX11`, `libSDL2` (x11grab/xcbgrab/sdl devices
+PodFlick never uses) as **dynamic** deps on `/opt/homebrew/...`. Under the app's
+**hardened runtime**, library validation then refuses to load those non-
+Developer-ID dylibs and `ffprobe`/`ffmpeg` die at runtime (`… have different
+Team IDs`). Felt 2026-07-07: the first notarized build failed every upload this
+way; a plain dev build hid it (no hardened runtime). `--disable-autodetect`
+forces a self-contained binary — verify with `otool -L` (below).
+
 ```
 # from a fresh ffmpeg source tree, per architecture
 ./configure \
   --prefix="$PWD/dist/$(uname -m)" \
+  --disable-autodetect \
   --enable-videotoolbox \
   --enable-audiotoolbox \
   --disable-libx264 \
@@ -69,6 +80,11 @@ Sanity-check the result before embedding:
 ```
 ./dist/ffmpeg -hide_banner -encoders | grep -E 'h264_videotoolbox|(^| )aac'
 ./dist/ffmpeg -hide_banner -L | grep -i gpl   # must print nothing / "LGPL"
+# Self-containment (hardened runtime): NO non-system dylibs — both must print CLEAN.
+for b in ffprobe ffmpeg; do
+  otool -L "dist/$(uname -m)/bin/$b" | grep -vE '/usr/lib/|/System/' | grep '\.dylib' \
+    || echo "$b CLEAN"
+done
 ```
 
 ## (3) Build the Release .app + embed the binaries
