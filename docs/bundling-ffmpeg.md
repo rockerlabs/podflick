@@ -219,6 +219,22 @@ Final gate (offline Gatekeeper check):
 spctl -a -vvv --type exec "$APP"    # -> accepted, source=Notarized Developer ID
 ```
 
+### Package a DMG (drag-to-install) — optional, nicer than a zip
+
+Once the `.app` is notarized + stapled, `scripts/make-dmg.sh` wraps it into a
+**drag-to-install DMG** (the app next to an `/Applications` alias) and then
+signs + notarizes + staples the **DMG itself**, so it mounts with no Gatekeeper
+warning:
+
+```
+./scripts/make-dmg.sh   # -> PodFlick-<version>.dmg (from the built .app)
+```
+
+Ship that `.dmg` as the release asset instead of (or alongside) the zip. It
+uses only `hdiutil` (no extra tooling); a prettier DMG with a background image
+and positioned icons would need `create-dmg`, deferred as polish. `spctl -a -t
+open` on the result must print `accepted`.
+
 ## (5) LGPL compliance for the shipped binary
 
 Because ffmpeg is redistributed (not just referenced), the release must carry:
