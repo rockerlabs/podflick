@@ -25,7 +25,11 @@ step() { printf '\n==> %s\n' "$*"; }
 
 version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
   "$APP/Contents/Info.plist")
-DMG="PodFlick-$version.dmg"
+# Version-less name so a release always has a `PodFlick.dmg` asset — that lets
+# README link to the stable https://…/releases/latest/download/PodFlick.dmg
+# (always the newest). The version lives in the app / tag / CHANGELOG.
+DMG="PodFlick.dmg"
+echo "packaging PodFlick $version -> $DMG"
 
 if [ -z "${SIGN_IDENTITY:-}" ]; then
   ids=$(security find-identity -p codesigning -v | grep "Developer ID Application" || true)
