@@ -51,6 +51,13 @@ This is the headline path: app **not** running, transfer launches it windowless.
 1. In Finder, **right-click the video** → **Services** → **Transfer to iPod**.
    - _Expect:_ the menu item is present (proves the `/Applications` +
      `pbs -flush` registration took).
+   - _macOS 26 (Tahoe) caveat:_ registration alone is **not** enough — the
+     service ships toggled **off**, so the item stays hidden until you enable it
+     once in **System Settings → Keyboard → Keyboard Shortcuts… → Services →
+     Files and Folders → Transfer to iPod**. Confirm the checkbox is ticked
+     before treating a missing item as a failure. (`pbs -dump` /
+     `defaults read pbs` can report it as registered/enabled while the System
+     Settings checkbox is still off — trust the checkbox, not the cache.)
 2. _Expect:_ **no Dock icon flash, no window.** The app launches as an
    `LSUIElement` agent and stays `.accessory`
    ([AppState.enterBackgroundMode](../Sources/PodFlick/App/AppState.swift)).

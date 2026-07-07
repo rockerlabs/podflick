@@ -51,6 +51,12 @@ notification.
 > Services menu item for it. After the first copy into `/Applications`, launch
 > the app once (and, if needed, `/System/Library/CoreServices/pbs -flush`) so
 > macOS registers the service.
+>
+> **On macOS 26 (Tahoe) you must also enable the service once.** Even when it's
+> registered, macOS ships the toggle **off**, so the menu item stays hidden until
+> you tick it: **System Settings → Keyboard → Keyboard Shortcuts… → Services →
+> Files and Folders → Transfer to iPod**. (No toggle needed for the
+> `podflick://` URL scheme.)
 
 Full hardware smoke steps: [docs/smoke-service-transfer.md](docs/smoke-service-transfer.md).
 
