@@ -70,7 +70,11 @@ codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
 
 step "Verify signature"
 codesign --verify --deep --strict --verbose=2 "$APP"
-codesign -dv --verbose=4 "$APP" 2>&1 | grep -q 'flags=0x10000(runtime)' \
+# Capture then match via a here-string, NOT `codesign … | grep -q`: grep -q
+# closes the pipe on the first match, codesign gets SIGPIPE, and under
+# `set -o pipefail` that fails the pipeline even though the flag WAS found.
+sig=$(codesign -dv --verbose=4 "$APP" 2>&1)
+grep -q 'flags=0x10000(runtime)' <<<"$sig" \
   || die "hardened runtime flag missing on the signed app"
 
 if [ "${SKIP_NOTARIZE:-}" = 1 ]; then
@@ -84,7 +88,7 @@ zip="build/$SCHEME.zip"
 ditto -c -k --keepParent "$APP" "$zip"
 out=$(xcrun notarytool submit "$zip" --keychain-profile "$NOTARY_PROFILE" --wait 2>&1) || true
 echo "$out"
-echo "$out" | grep -q "status: Accepted" \
+grep -q "status: Accepted" <<<"$out" \
   || die "notarization not Accepted — inspect: xcrun notarytool log <id> --keychain-profile $NOTARY_PROFILE"
 
 step "Staple"
