@@ -8,16 +8,19 @@ device's `iTunesDB`, using surgical in-place edits proven against real
 hardware. Works with both Mac-formatted (HFS+) and Windows-formatted
 (FAT32, incl. Rockbox dual-boot) iPods.
 
-## Download
+## Install
 
-**[⬇ Download the latest release](https://github.com/rockerlabs/podflick/releases/latest)** —
-unzip `PodFlick-1.0.zip`, move **PodFlick.app** into `/Applications`, and open
-it. The app is signed and **notarized**, so it opens with no "unidentified
-developer" warning, and **ffmpeg is bundled** — no `brew install` required.
+**[⬇ Download PodFlick.dmg](https://github.com/rockerlabs/podflick/releases/latest/download/PodFlick.dmg)**
+(always the latest) — open it and drag **PodFlick** into **Applications**.
+That's the whole install: the app is signed and **notarized** (it opens with no
+"unidentified developer" warning) and **ffmpeg is bundled**, so no `brew
+install` is needed.
 
 Requirements: **Apple Silicon (arm64), macOS 14+**, and an iPod Video 5G/5.5G
 mounted as a disk. (Moving the app into `/Applications` also registers the
 Finder **Transfer to iPod** service — see below.)
+
+A specific version or a plain `.zip` is on the [releases page](https://github.com/rockerlabs/podflick/releases).
 
 ## Status
 
