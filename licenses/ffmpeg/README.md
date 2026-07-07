@@ -37,6 +37,7 @@ The exact source for the bundled binaries is:
 
   ```
   ./configure --prefix="$PWD/dist" \
+    --disable-autodetect \
     --enable-videotoolbox --enable-audiotoolbox \
     --disable-libx264 --disable-gpl --disable-nonfree \
     --disable-doc --disable-debug \
