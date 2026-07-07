@@ -14,7 +14,9 @@
 #   - Signing.local.xcconfig with DEVELOPMENT_TEAM set (copy Signing.xcconfig.template)
 #
 # Config via environment variables:
-#   FFMPEG_BIN_DIR   dir holding the LGPL ffmpeg + ffprobe to embed   (required)
+#   FFMPEG_BIN_DIR   dir holding the LGPL ffmpeg + ffprobe to embed. OMIT for a
+#                    "no-bundle" build that relies on an ffmpeg on the user's PATH
+#                    (lighter; the user must `brew install ffmpeg` themselves).
 #   SIGN_IDENTITY    codesign identity; auto-detected when exactly one
 #                    "Developer ID Application" cert is present
 #   NOTARY_PROFILE   notarytool keychain profile        (default: podflick-notary)
@@ -33,11 +35,13 @@ step() { printf '\n==> %s\n' "$*"; }
 [ -f project.yml ] || die "run from the repo root (project.yml not found)"
 
 # ---- config + prerequisites -------------------------------------------------
+# FFMPEG_BIN_DIR unset → no-bundle build (uses ffmpeg on the user's PATH).
 FFMPEG_BIN_DIR="${FFMPEG_BIN_DIR:-}"
-[ -n "$FFMPEG_BIN_DIR" ] || die "set FFMPEG_BIN_DIR to the dir holding ffmpeg + ffprobe"
-for tool in ffmpeg ffprobe; do
-  [ -x "$FFMPEG_BIN_DIR/$tool" ] || die "not executable: $FFMPEG_BIN_DIR/$tool"
-done
+if [ -n "$FFMPEG_BIN_DIR" ]; then
+  for tool in ffmpeg ffprobe; do
+    [ -x "$FFMPEG_BIN_DIR/$tool" ] || die "not executable: $FFMPEG_BIN_DIR/$tool"
+  done
+fi
 [ -f Signing.local.xcconfig ] \
   || die "Signing.local.xcconfig missing (copy Signing.xcconfig.template, set DEVELOPMENT_TEAM)"
 
@@ -57,15 +61,21 @@ xcodegen generate
 xcodebuild -project "$SCHEME.xcodeproj" -scheme "$SCHEME" -configuration "$CONFIG" \
   -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
 
-step "Embed ffmpeg + ffprobe under Contents/Resources/bin"
 bin="$APP/Contents/Resources/bin"
-mkdir -p "$bin"
-cp "$FFMPEG_BIN_DIR/ffmpeg" "$FFMPEG_BIN_DIR/ffprobe" "$bin/"
+if [ -n "$FFMPEG_BIN_DIR" ]; then
+  step "Embed ffmpeg + ffprobe under Contents/Resources/bin"
+  mkdir -p "$bin"
+  cp "$FFMPEG_BIN_DIR/ffmpeg" "$FFMPEG_BIN_DIR/ffprobe" "$bin/"
+else
+  step "No FFMPEG_BIN_DIR — no-bundle build (uses an ffmpeg on the user's PATH)"
+fi
 
 # ---- (4) sign ---------------------------------------------------------------
-step "Sign inner binaries first, then the app (hardened runtime)"
-codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" \
-  "$bin/ffmpeg" "$bin/ffprobe"
+step "Sign inner binaries (if bundled) first, then the app (hardened runtime)"
+if [ -n "$FFMPEG_BIN_DIR" ]; then
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" \
+    "$bin/ffmpeg" "$bin/ffprobe"
+fi
 codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
 
 step "Verify signature"
