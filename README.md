@@ -1,5 +1,8 @@
 # PodFlick
 
+[![CI](https://github.com/rockerlabs/podflick/actions/workflows/ci.yml/badge.svg)](https://github.com/rockerlabs/podflick/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Drag & drop videos onto your classic iPod (5G/5.5G) — no iTunes.
 
 PodFlick converts any video to the iPod Video spec (H.264 baseline
