@@ -70,8 +70,8 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # Single source of truth for the app version; bump these per release.
         # Wired into CFBundleShortVersionString/CFBundleVersion above.
-        MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.0.1"
+        CURRENT_PROJECT_VERSION: "2"
       configs:
         # Hardened runtime is required for Developer ID notarization (B.15 step
         # 4). Scoped to Release only so Debug builds — which sign with an Apple
