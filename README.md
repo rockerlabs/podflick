@@ -8,16 +8,30 @@ device's `iTunesDB`, using surgical in-place edits proven against real
 hardware. Works with both Mac-formatted (HFS+) and Windows-formatted
 (FAT32, incl. Rockbox dual-boot) iPods.
 
+## Download
+
+**[⬇ Download the latest release](https://github.com/rockerlabs/podflick/releases/latest)** —
+unzip `PodFlick-1.0.zip`, move **PodFlick.app** into `/Applications`, and open
+it. The app is signed and **notarized**, so it opens with no "unidentified
+developer" warning, and **ffmpeg is bundled** — no `brew install` required.
+
+Requirements: **Apple Silicon (arm64), macOS 14+**, and an iPod Video 5G/5.5G
+mounted as a disk. (Moving the app into `/Applications` also registers the
+Finder **Transfer to iPod** service — see below.)
+
 ## Status
 
-Early scaffold. The DB algorithm is fully proven in the Python reference
-implementation (`reference/`, verified end-to-end on two devices on
-2026-07-02); the Swift port is in progress.
+**PodFlick 1.0 is released** — see the [changelog](CHANGELOG.md). The iTunesDB
+engine is proven end-to-end on real hardware; the Python reference
+implementation + golden fixtures are in [`reference/`](reference/) and the
+format spec is in [docs/itunesdb-format.md](docs/itunesdb-format.md).
 
-- Format documentation: [docs/itunesdb-format.md](docs/itunesdb-format.md)
-- Reference implementation + golden fixtures: [reference/](reference/)
+## Build from source
 
-## Build
+For contributors, or a dev build. A source build shells out to an `ffmpeg` on
+your `PATH` (rather than the bundled one); producing a self-contained,
+notarized release is documented in
+[docs/bundling-ffmpeg.md](docs/bundling-ffmpeg.md).
 
 ```
 brew install xcodegen ffmpeg
@@ -26,11 +40,7 @@ xcodegen generate
 xcodebuild -project PodFlick.xcodeproj -scheme PodFlick build
 ```
 
-## Requirements
-
-- macOS 14+, Xcode 15+
-- ffmpeg on PATH (conversion)
-- An iPod Video 5G/5.5G mounted as a disk
+Build requirements: macOS 14+, Xcode 15+, `ffmpeg` on `PATH`.
 
 ## Background transfer (Finder service + URL scheme)
 
