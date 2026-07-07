@@ -10,16 +10,17 @@ hardware. Works with both Mac-formatted (HFS+) and Windows-formatted
 
 ## Install
 
-**[⬇ Download PodFlick-1.0.dmg](https://github.com/rockerlabs/podflick/releases/download/v1.0/PodFlick-1.0.dmg)**
-— open it and drag **PodFlick** into **Applications**. That's the whole install:
-the app is signed and **notarized** (it opens with no "unidentified developer"
-warning) and **ffmpeg is bundled**, so no `brew install` is needed.
+**[⬇ Download PodFlick.dmg](https://github.com/rockerlabs/podflick/releases/latest/download/PodFlick.dmg)**
+(always the latest) — open it and drag **PodFlick** into **Applications**.
+That's the whole install: the app is signed and **notarized** (it opens with no
+"unidentified developer" warning) and **ffmpeg is bundled**, so no `brew
+install` is needed.
 
 Requirements: **Apple Silicon (arm64), macOS 14+**, and an iPod Video 5G/5.5G
 mounted as a disk. (Moving the app into `/Applications` also registers the
 Finder **Transfer to iPod** service — see below.)
 
-Prefer a plain `.zip`? It's on the [releases page](https://github.com/rockerlabs/podflick/releases/latest).
+A specific version or a plain `.zip` is on the [releases page](https://github.com/rockerlabs/podflick/releases).
 
 ## Status
 
