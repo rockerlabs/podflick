@@ -267,4 +267,69 @@ final class ITunesDBWriterTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(track.pathMhodRange).count,
                        0x18 + 16 + pathBytes, "path mhod must be exact-size")
     }
+
+    // MARK: - B.19 createPlaylist (manual, non-master)
+
+    func testCreatePlaylistAddsManualPlaylistToBothSections() throws {
+        let original = try fixture("iTunesDB.four-videos")
+        var writer = try ITunesDBWriter(original)
+        let before = writer.db
+        let masterTrackIDs = try XCTUnwrap(before.masterPlaylists.first).items.map(\.trackID)
+        let chosen = [masterTrackIDs[0], masterTrackIDs[2]]   // 31, 62
+        let pid: UInt64 = 0x1234_5678_90AB_CDEF
+        var seq: UInt64 = 0
+
+        let returned = try writer.createPlaylist(
+            title: "Sample Playlist", trackIDs: chosen,
+            persistentID: pid, timestamp: timestamp,
+            makeItemDBID: { seq += 1; return 0xAA00 + seq })
+        XCTAssertEqual(returned, pid)
+        XCTAssertNotEqual(writer.data, original, "the DB must change")
+
+        let db = writer.db
+        let manual = db.playlists.filter { !$0.isMaster && !$0.isSmart }
+        XCTAssertEqual(manual.count, 2, "one manual playlist per playlist section")
+        XCTAssertEqual(Set(manual.map(\.section.type)), [2, 3],
+                       "spliced into both identical-copy sections")
+        for playlist in manual {
+            XCTAssertEqual(playlist.title, "Sample Playlist")
+            XCTAssertFalse(playlist.isMaster)
+            XCTAssertFalse(playlist.isSmart, "must carry no smart-rule mhods")
+            XCTAssertEqual(playlist.persistentID, pid)
+            XCTAssertEqual(playlist.items.map(\.trackID), chosen)
+            // Item ids are fresh, above the pre-create maximum (69) and unique.
+            XCTAssertEqual(playlist.items.map(\.itemID), [70, 71])
+            for item in playlist.items {
+                let track = try XCTUnwrap(db.tracks.first { $0.id == item.trackID })
+                XCTAssertEqual(item.trackDBID, track.dbid,
+                               "mhip must carry the referenced track's dbid")
+            }
+        }
+
+        // The master playlists, tracks, smart playlists and albums are untouched.
+        XCTAssertEqual(db.masterPlaylists.count, before.masterPlaylists.count)
+        for (after, orig) in zip(db.masterPlaylists, before.masterPlaylists) {
+            XCTAssertEqual(after.items.map(\.trackID), orig.items.map(\.trackID))
+            XCTAssertEqual(after.persistentID, orig.persistentID)
+        }
+        XCTAssertEqual(db.tracks.map(\.id), before.tracks.map(\.id))
+        XCTAssertEqual(db.smartPlaylists.map(\.title),
+                       before.smartPlaylists.map(\.title))
+        XCTAssertEqual(db.albums.count, before.albums.count)
+    }
+
+    func testCreateEmptyPlaylist() throws {
+        var writer = try ITunesDBWriter(try fixture("iTunesDB.single-video"))
+        try writer.createPlaylist(title: "Empty", trackIDs: [],
+                                  persistentID: 0x99, timestamp: timestamp)
+        let manual = writer.db.playlists.filter { !$0.isMaster && !$0.isSmart }
+        XCTAssertEqual(manual.count, 2)
+        XCTAssertTrue(manual.allSatisfy { $0.title == "Empty" && $0.items.isEmpty })
+    }
+
+    func testCreatePlaylistWithUnknownTrackThrows() throws {
+        var writer = try ITunesDBWriter(try fixture("iTunesDB.single-video"))
+        XCTAssertThrowsError(
+            try writer.createPlaylist(title: "x", trackIDs: [999_999]))
+    }
 }

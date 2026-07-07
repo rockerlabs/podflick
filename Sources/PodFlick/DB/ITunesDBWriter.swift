@@ -182,6 +182,126 @@ struct ITunesDBWriter {
         try apply(edits)
     }
 
+    // MARK: - createPlaylist
+
+    /// Splices a new manual (non-master) playlist into every playlist section.
+    /// The new mhyp clones the master mhyp's header and its generic type100/102
+    /// settings mhods — both proven-visible in every playlist on the device —
+    /// clears the master flag, carries a fresh title, and lists `trackIDs` as
+    /// cloned mhips. No mhit is created; the tracks must already exist. Returns
+    /// the new playlist's persistentID. persistentID/timestamp/itemDBIDs are
+    /// injectable so tests are deterministic.
+    @discardableResult
+    mutating func createPlaylist(title: String, trackIDs: [UInt32],
+                                 persistentID: UInt64 = randomDBID(),
+                                 timestamp: UInt32 = macTimestampNow(),
+                                 makeItemDBID: () -> UInt64 = { randomDBID() }) throws -> UInt64 {
+        guard let donor = db.masterPlaylists.first else {
+            throw WriteError(message: "DB has no master playlist to clone from")
+        }
+        // Splice into each section that holds a master copy (the donor's peers),
+        // not merely every type-2/3 section — so an atypical playlist-less
+        // section never receives a stray manual playlist.
+        let sections = db.masterPlaylists.map(\.section)
+        // Resolve each track to its dbid (the mhip carries the track's dbid).
+        let items = try trackIDs.map { (id: $0, dbid: try track(withID: $0).dbid) }
+
+        let base = maxUsedID()
+        // Each item takes one fresh never-reused id; guard the u32 ceiling.
+        guard UInt64(base) + UInt64(items.count) + 1 <= UInt64(UInt32.max) else {
+            throw WriteError(message: "id space exhausted building playlist")
+        }
+
+        // The mhyp is section-independent — build once, splice a copy into each
+        // so the two "identical copy" sections stay identical (as add/remove do).
+        let mhyp = try buildPlaylistMhyp(
+            donor: donor, title: title, persistentID: persistentID,
+            items: items, base: base, timestamp: timestamp,
+            makeItemDBID: makeItemDBID)
+
+        var edits: [Edit] = []
+        for section in sections {
+            let listEnd = section.offset + section.totalSize
+            edits.append(Edit(
+                range: listEnd..<listEnd,
+                replacement: mhyp,
+                sizeBumpOffsets: [section.offset + 8],
+                countBump: (offset: section.listOffset + 8, delta: 1)))
+        }
+        try apply(edits)
+        return persistentID
+    }
+
+    /// Assembles one manual-playlist mhyp: the master's header (master flag
+    /// cleared, ids/counts patched) + a fresh title mhod + the master's generic
+    /// type100/102 settings mhods verbatim + one cloned mhip per track. The
+    /// master-only sort-index mhods (52/53) are dropped. Every retained blob is
+    /// proven-visible from the current DB, so this stays a donor-clone.
+    private func buildPlaylistMhyp(
+        donor: ITunesDB.Playlist, title: String, persistentID: UInt64,
+        items: [(id: UInt32, dbid: UInt64)], base: UInt32, timestamp: UInt32,
+        makeItemDBID: () -> UInt64
+    ) throws -> Data {
+        let r = Reader(data)
+        let headerSize = Int(try r.u32(donor.offset + 4))
+        // Patched fields reach persistentID@0x1C..0x24; the master's header is
+        // 0xB8, far larger — reject an exotic donor rather than write past it.
+        guard headerSize >= 0x2C, headerSize <= donor.totalSize else {
+            throw WriteError(message:
+                "master mhyp header 0x\(String(headerSize, radix: 16)) too small to clone")
+        }
+
+        // Carry the generic settings mhods (type 100, 102) verbatim, in file
+        // order; drop the master-only library indexes (52/53).
+        var settings = Data()
+        var keptMhods = 0
+        var cursor = donor.offset + headerSize
+        let mhodLimit = donor.offset + donor.totalSize   // stay inside the mhyp
+        for _ in 0..<Int(try r.u32(donor.offset + 12)) {
+            try r.expectMagic("mhod", at: cursor)
+            let total = Int(try r.u32(cursor + 8))
+            // Match the parser's per-parent discipline: a mhod that overruns
+            // its mhyp fails loudly rather than reading into the mhips beyond.
+            guard total >= 16, cursor + total <= mhodLimit else {
+                throw WriteError(message: "donor mhod overruns its mhyp")
+            }
+            switch try r.u32(cursor + 12) {
+            case 100, 102:
+                settings.append(data.subdata(in: cursor ..< cursor + total))
+                keptMhods += 1
+            default:
+                break
+            }
+            cursor += total
+        }
+
+        // One mhip per track, each with a distinct 0-based order position.
+        guard let donorItem = donor.items.last else {
+            throw WriteError(message: "donor playlist has no mhip to clone from")
+        }
+        var mhips = Data()
+        for (index, item) in items.enumerated() {
+            mhips += try cloneItem(
+                donor: donorItem, in: data,
+                trackID: item.id, itemID: base + 1 + UInt32(index),
+                trackDBID: item.dbid, itemDBID: makeItemDBID(),
+                timestamp: timestamp, position: UInt32(index))
+        }
+
+        var header = data.subdata(in: donor.offset ..< donor.offset + headerSize)
+        header[header.startIndex + 20] = 0              // master flag → manual
+        header.putU32(UInt32(1 + keptMhods), at: 12)    // title + kept settings
+        header.putU32(UInt32(items.count), at: 16)
+        header.putU64(persistentID, at: 28)
+        let body = try Self.stringMhod(type: 1, title) + settings + mhips
+        guard let total = UInt32(exactly: headerSize + body.count) else {
+            throw WriteError(message:
+                "playlist mhyp total \(headerSize + body.count) overflows u32")
+        }
+        header.putU32(total, at: 8)
+        return header + body
+    }
+
     // MARK: - Splice application
 
     /// One splice: replace `range` with `replacement` (either side may be
@@ -270,12 +390,17 @@ struct ITunesDBWriter {
         return header + children
     }
 
-    /// `source` is the data the donor's offsets index into: this DB's own
-    /// bytes, or the seed donor DB's when the master copy has no mhip left.
+    /// Clones a donor mhip, swapping in the per-item ids. `source` is the
+    /// data the donor's offsets index into: this DB's own bytes, or the seed
+    /// donor DB's when the master copy has no mhip left. `position` sets the
+    /// child mhod100 order value explicitly (createPlaylist passes a distinct
+    /// index per item); when nil the donor's value + 2 is kept — the
+    /// single-item add() behavior, where no sibling can collide.
     private func cloneItem(donor: ITunesDB.PlaylistItem, in source: Data,
                            trackID: UInt32,
                            itemID: UInt32, trackDBID: UInt64,
-                           itemDBID: UInt64, timestamp: UInt32) throws -> Data {
+                           itemDBID: UInt64, timestamp: UInt32,
+                           position: UInt32? = nil) throws -> Data {
         let headerSize = Int(try Reader(source).u32(donor.offset + 4))
         // Patched fields end at 0x44; the child mhod100's position value
         // sits at header + 0x18.
@@ -288,13 +413,19 @@ struct ITunesDBWriter {
         blob.putU32(timestamp, at: 0x1C)
         blob.putU64(trackDBID, at: 0x2C)
         blob.putU64(itemDBID, at: 0x3C)
-        // mhod100 carries an order/position value: donor's + a small bump.
+        // mhod100 carries an order/position value.
         let positionOffset = headerSize + 0x18
-        let position = try Reader(blob).u32(positionOffset)
-        guard let bumped = UInt32(exactly: UInt64(position) + 2) else {
-            throw WriteError(message: "mhod100 position \(position) overflows u32")
+        let value: UInt32
+        if let position {
+            value = position
+        } else {
+            let donorPosition = try Reader(blob).u32(positionOffset)
+            guard let bumped = UInt32(exactly: UInt64(donorPosition) + 2) else {
+                throw WriteError(message: "mhod100 position \(donorPosition) overflows u32")
+            }
+            value = bumped
         }
-        blob.putU32(bumped, at: positionOffset)
+        blob.putU32(value, at: positionOffset)
         return blob
     }
 
