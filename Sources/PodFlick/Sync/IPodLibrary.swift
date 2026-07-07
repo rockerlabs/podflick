@@ -104,9 +104,7 @@ struct IPodLibrary {
         guard !db.masterPlaylists.isEmpty else {
             throw LibraryError.noMasterPlaylist
         }
-        if needsSeed(db), seedDatabaseURL == nil {
-            throw LibraryError.cannotAddToEmptyLibrary
-        }
+        _ = try seedDonor(for: db)
     }
 
     /// True when the DB cannot supply its own donors: no track to clone, or
@@ -117,14 +115,20 @@ struct IPodLibrary {
     }
 
     /// Loads the bundled donor DB when the on-device DB needs seeding; nil
-    /// when it can donate to itself. Reading the 16 KB resource per commit is
-    /// noise next to the multi-GB media copy that precedes it.
+    /// when it can donate to itself. Validates the seed actually holds the
+    /// donors the splice will clone, so a missing/unparseable/donor-less
+    /// resource fails in precheckAdd — BEFORE the multi-GB copy, not after.
+    /// Reading the 16 KB resource twice per seeded add is noise next to
+    /// that copy.
     private func seedDonor(for db: ITunesDB) throws -> ITunesDBWriter.SeedDonor? {
         guard needsSeed(db) else { return nil }
-        guard let url = seedDatabaseURL else {
+        guard let url = seedDatabaseURL,
+              let seed = try? ITunesDBWriter.SeedDonor(try Data(contentsOf: url)),
+              !seed.db.tracks.isEmpty,
+              seed.db.masterPlaylists.contains(where: { !$0.items.isEmpty }) else {
             throw LibraryError.cannotAddToEmptyLibrary
         }
-        return try ITunesDBWriter.SeedDonor(try Data(contentsOf: url))
+        return seed
     }
 
     /// Phase 1 — no DB access, so the queued upload runs it OFF the write

@@ -261,6 +261,44 @@ final class IPodLibraryTests: XCTestCase {
         XCTAssertEqual(try onDeviceDB, writer.data)
     }
 
+    func testAddFailsFastWhenSeedDonorDBIsUnusable() throws {
+        // The configured seed DB is itself emptied of donors — precheckAdd
+        // must reject BEFORE any bytes are copied, exactly like the no-seed
+        // case (in real use the copy it spares is multi-GB).
+        var writer = try ITunesDBWriter(try fixture("iTunesDB.single-video"))
+        try writer.remove(trackID: try XCTUnwrap(writer.db.tracks.first).id)
+        try install(database: writer.data, onVolume: volume)
+        let emptySeed = workDir.appendingPathComponent("empty-seed.itdb")
+        try writer.data.write(to: emptySeed)
+        library.seedDatabaseURL = emptySeed
+
+        let source = try makeSourceFile()
+        XCTAssertThrowsError(try library.add(
+            file: source, title: "orphan", durationMs: 1_000,
+            folder: "F07", filename: "TEST.m4v")) { error in
+            XCTAssertEqual(error as? IPodLibrary.LibraryError,
+                           .cannotAddToEmptyLibrary)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: volume.appendingPathComponent("iPod_Control/Music/F07/TEST.m4v").path))
+    }
+
+    func testPrecheckThrowsNoMasterPlaylistWhenDBHasNone() throws {
+        // Clear the master flag byte (+20, the documented discriminator) of
+        // both master mhyps: playlists survive, but none is the master —
+        // the shape PodFlick refuses to seed (it never builds playlist
+        // structure from scratch).
+        var data = try fixture("iTunesDB.single-video")
+        for playlist in try ITunesDB.parse(data).playlists where playlist.isMaster {
+            data[playlist.offset + 20] = 0
+        }
+        try install(database: data, onVolume: volume)
+
+        XCTAssertThrowsError(try library.precheckAdd(title: "x")) { error in
+            XCTAssertEqual(error as? IPodLibrary.LibraryError, .noMasterPlaylist)
+        }
+    }
+
     func testAddSeedsEmptiedLibraryFromSeedDonorDB() throws {
         // The library-wipe shape end-to-end: every video deleted, then one
         // uploaded, with the bundled seed donor configured (as in the app,
