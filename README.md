@@ -68,6 +68,8 @@ Either way the app converts and writes in the background: no window, just a
 menu-bar item showing progress and an **Eject** action, plus a completion
 notification.
 
+![Right-click a video → Services → Transfer to iPod; a menu-bar item shows the transfer progress and offers Eject when it is done.](docs/demo-background.gif)
+
 > **The Finder "Transfer to iPod" item only appears when `PodFlick.app` lives
 > in `/Applications`.** Running a copy straight from the build folder works when
 > invoked directly (e.g. via `NSPerformService`), but Finder won't surface the
