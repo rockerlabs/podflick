@@ -34,23 +34,26 @@ A specific version or a plain `.zip` is on the [releases page](https://github.co
 
 ## Compatibility
 
-**iPods.** PodFlick targets the **iPod Video 5G / 5.5G** (2005–2007, 30/60/80 GB)
-running the **stock Apple firmware** — that's where the transferred videos play.
-Everything is proven on real hardware:
+### iPods
 
-- Both disk formats work: **Mac-formatted (HFS+)** and **Windows-formatted
-  (FAT32)** iPods.
-- **Rockbox dual-boot** devices work too — PodFlick writes the Apple-firmware
-  database, so boot into the original firmware to watch (see
-  [Known issues](#known-issues--limitations)).
-- The iPod must mount as a disk (Enable Disk Use / disk mode).
+| Device | Firmware | Disk format | Status |
+| --- | --- | --- | --- |
+| iPod Video 5G (2005, 30/60 GB) | stock Apple | HFS+ or FAT32 | ✅ Supported, proven on real hardware |
+| iPod Video 5.5G (2006, 30/80 GB) | stock Apple | HFS+ or FAT32 | ✅ Supported, proven on real hardware |
+| iPod Video 5G/5.5G | Rockbox dual-boot | FAT32 | ✅ Supported — boot the Apple firmware to watch (see [Known issues](#known-issues--limitations)) |
+| iPod Classic (6G and later) | stock Apple | — | 🔜 Planned — hash-protected `iTunesDB` (see [Roadmap](#roadmap)) |
+| Nano / Shuffle / Touch, iPhone, iPad | — | — | ❌ Not planned |
 
-Not supported: **iPod Classic 6G and later** (their `iTunesDB` is
-hash-protected — on the [roadmap](#roadmap)), Nano/Shuffle/Touch, and iOS
-devices.
+The iPod must mount as a disk (Enable Disk Use / disk mode); transferred
+videos play in the **stock Apple firmware**.
 
-**Macs.** Apple Silicon (arm64) running **macOS 14 or newer**. Intel Macs and
-older macOS versions are not supported; there is no Windows or Linux version.
+### Computers
+
+| Platform | Status |
+| --- | --- |
+| Apple Silicon Mac, macOS 14+ | ✅ Supported (verified up to macOS 26 Tahoe) |
+| Intel Mac | ❌ Not supported |
+| Windows / Linux | ❌ Not planned |
 
 ## Status
 
