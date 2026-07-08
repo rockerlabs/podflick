@@ -83,6 +83,8 @@ notification.
 > Files and Folders → Transfer to iPod**. (No toggle needed for the
 > `podflick://` URL scheme.)
 
+![Enabling the Finder service on macOS 26: the context menu has no Transfer to iPod at first; tick it under System Settings → Keyboard → Keyboard Shortcuts… → Services → Files and Folders, and the menu item appears.](docs/demo-enable-service.gif)
+
 Full hardware smoke steps: [docs/smoke-service-transfer.md](docs/smoke-service-transfer.md).
 
 ## Known issues & limitations
