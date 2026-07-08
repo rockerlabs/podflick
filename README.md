@@ -32,6 +32,26 @@ Finder **Transfer to iPod** service — see below.)
 
 A specific version or a plain `.zip` is on the [releases page](https://github.com/rockerlabs/podflick/releases).
 
+## Compatibility
+
+**iPods.** PodFlick targets the **iPod Video 5G / 5.5G** (2005–2007, 30/60/80 GB)
+running the **stock Apple firmware** — that's where the transferred videos play.
+Everything is proven on real hardware:
+
+- Both disk formats work: **Mac-formatted (HFS+)** and **Windows-formatted
+  (FAT32)** iPods.
+- **Rockbox dual-boot** devices work too — PodFlick writes the Apple-firmware
+  database, so boot into the original firmware to watch (see
+  [Known issues](#known-issues--limitations)).
+- The iPod must mount as a disk (Enable Disk Use / disk mode).
+
+Not supported: **iPod Classic 6G and later** (their `iTunesDB` is
+hash-protected — on the [roadmap](#roadmap)), Nano/Shuffle/Touch, and iOS
+devices.
+
+**Macs.** Apple Silicon (arm64) running **macOS 14 or newer**. Intel Macs and
+older macOS versions are not supported; there is no Windows or Linux version.
+
 ## Status
 
 **PodFlick 1.0 is released** — see the [changelog](CHANGELOG.md). The iTunesDB
@@ -109,15 +129,29 @@ couple of troubleshooting notes. None of them are bugs in the transfer itself.
   and music work under Rockbox, but boot into the original Apple firmware to watch
   the transferred video.
 
-- **Platform support is narrow.** Apple Silicon (arm64) and macOS 14+ only — Intel
-  Macs aren't supported — and the target device is an iPod Video 5G/5.5G.
-
 - **If the iPod keeps mounting and unmounting (flapping),** try a different USB
   cable before anything else. A device that mounts for a second, disconnects, and
   repeats is almost always a bad cable or contact, not PodFlick.
 
 - **No Finder "Transfer to iPod" item?** It only appears once `PodFlick.app` lives
   in `/Applications` — see [Background transfer](#background-transfer-finder-service--url-scheme).
+
+## Roadmap
+
+Planned, in no particular order and with no dates — subject to change:
+
+- **Manual playlists** — create playlists on the iPod from the app (the
+  database engine already supports it; the UI is next).
+- **Music support** — sync audio, not just video.
+- **iPod Classic (6G and later)** — support the hash-protected `iTunesDB` of
+  the later Classics.
+- **Device backup & restore** — one-click copy of the iPod's media + database
+  to the Mac and back, as a safety net for aging hardware.
+- **Localization** — externalize the UI strings; Russian first.
+- **Smoother Finder-service setup** — surface the macOS 26 Services toggle
+  from the app instead of the manual System Settings trip.
+
+Found a bug or want something else? [Open an issue](https://github.com/rockerlabs/podflick/issues).
 
 ## License
 
