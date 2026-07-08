@@ -52,8 +52,9 @@ videos play in the **stock Apple firmware**.
 | Platform | Status |
 | --- | --- |
 | Apple Silicon Mac, macOS 14+ | ✅ Supported (verified up to macOS 26 Tahoe) |
-| Intel Mac | ❌ Not supported |
-| Windows / Linux | ❌ Not planned |
+| Intel Mac | 🔜 Planned — top of the porting list (universal binary) |
+| Linux | 💡 On the wishlist — long-term |
+| Windows | 💡 On the wishlist — long-term |
 
 ## Status
 
@@ -143,6 +144,9 @@ couple of troubleshooting notes. None of them are bugs in the transfer itself.
 
 Planned, in no particular order and with no dates — subject to change:
 
+- **Intel Mac support** — a universal (arm64 + x86_64) build, including the
+  bundled ffmpeg; the first port in line. Linux and Windows are on the
+  long-term wishlist after that.
 - **Manual playlists** — create playlists on the iPod from the app (the
   database engine already supports it; the UI is next).
 - **Music support** — sync audio, not just video.
