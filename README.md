@@ -11,6 +11,13 @@ device's `iTunesDB`, using surgical in-place edits proven against real
 hardware. Works with both Mac-formatted (HFS+) and Windows-formatted
 (FAT32, incl. Rockbox dual-boot) iPods.
 
+## Demo
+
+![Plug in an iPod, drop a video onto PodFlick, and it is converted and written to the device, ready to play.](docs/demo.gif)
+
+Plug in the iPod, drop a video anywhere in the window, eject — done.
+(Conversion sped up; a real transfer of this 10-minute clip takes under a minute.)
+
 ## Install
 
 **[⬇ Download PodFlick.dmg](https://github.com/rockerlabs/podflick/releases/latest/download/PodFlick.dmg)**
