@@ -38,9 +38,9 @@ A specific version or a plain `.zip` is on the [releases page](https://github.co
 
 | Device | Firmware | Disk format | Status |
 | --- | --- | --- | --- |
-| iPod Video 5G (2005, 30/60 GB) | stock Apple | HFS+ or FAT32 | ✅ Supported, proven on real hardware |
-| iPod Video 5.5G (2006, 30/80 GB) | stock Apple | HFS+ or FAT32 | ✅ Supported, proven on real hardware |
-| iPod Video 5G/5.5G | Rockbox dual-boot | FAT32 | ✅ Supported — boot the Apple firmware to watch (see [Known issues](#known-issues--limitations)) |
+| iPod Video 5G (2005, 30/60 GB) | stock Apple 1.3 | HFS+ or FAT32 | ✅ Supported, proven on real hardware |
+| iPod Video 5.5G (2006, 30/80 GB) | stock Apple 1.3 | HFS+ or FAT32 | ✅ Supported, proven on real hardware |
+| iPod Video 5G/5.5G | Rockbox 4.0 dual-boot (Apple 1.3) | FAT32 | ✅ Supported — boot the Apple firmware to watch (see [Known issues](#known-issues--limitations)) |
 | iPod Classic (6G and later) | stock Apple | — | 🔜 Planned — hash-protected `iTunesDB` (see [Roadmap](#roadmap)) |
 | Nano / Shuffle / Touch, iPhone, iPad | — | — | ❌ Not planned |
 
