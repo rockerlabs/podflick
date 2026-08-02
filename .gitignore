@@ -22,3 +22,7 @@ Signing.local.xcconfig
 # Python (reference/ selftest bytecode)
 __pycache__/
 *.pyc
+
+# keel-impact tracking: only the log is ignored — .keel/ledger.md (the durable per-session score
+# history) stays trackable.
+/.keel/impact-events.log
