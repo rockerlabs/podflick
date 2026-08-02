@@ -318,6 +318,14 @@ case "$mode" in
   --range)
     shift
     rng="${1:?--range needs A..B}"
+    # Validate the range up front — a typo'd/unfetched rev must be exit 2 (config error), not a
+    # silent "clean": the object walk below discards rev-list stderr, so a bad range would
+    # otherwise scan zero blobs and fail OPEN. --max-count=0 resolves the revs without walking.
+    # shellcheck disable=SC2086  # rng intentionally word-split into rev-list args
+    if ! git rev-list --max-count=0 $rng >/dev/null 2>&1; then
+      echo "secret-scan: bad range '$rng' — not resolvable in this repo" >&2
+      exit 2
+    fi
     # Scan every blob the push would INTRODUCE (objects reachable in the range), not the net endpoint
     # diff: a secret added in one pushed commit and removed in a later one is absent from both endpoint
     # trees yet its blob still ships and stays recoverable — `git diff A..B` would miss it. rng is a
@@ -413,6 +421,9 @@ case "$mode" in
     fi
     ;;
   staged|--staged|"")
+    # Outside a git repo there is nothing staged to scan — that is a caller error (exit 2), not a
+    # clean result: the `|| true` guards below would otherwise read as "clean" and fail OPEN.
+    git rev-parse --git-dir >/dev/null 2>&1 || { echo "secret-scan: --staged needs a git repo" >&2; exit 2; }
     while IFS= read -r f; do
       [ -n "$f" ] && emit_diff "$f" --cached
     done < <(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)
@@ -513,8 +524,14 @@ if [ "$found" = 1 ]; then
   # the first `git worktree list` entry, skipped when bare; awk reads its whole input on purpose — no early exit, no
   # SIGPIPE); with neither, nothing is written and the hook's behaviour is unchanged.
   _klog="${KEEL_IMPACT_LOG:-}"
+  _kclaim=""
   if [ -z "$_klog" ]; then
     _ktop="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    # dir #74: the claim key is THIS site's own toplevel, captured here before the main-checkout fallback
+    # below can overwrite $_ktop — that fallback only decides where the log FILE lives, not who fired the
+    # event. Saving it now (instead of re-deriving it at the write site) avoids a second identical
+    # `git rev-parse` subprocess for the same value.
+    _kclaim="$_ktop"
     if [ -n "$_ktop" ] && [ ! -d "$_ktop/.keel" ]; then
       _kmain="$(git worktree list --porcelain 2>/dev/null |
         awk 'NR==1{sub(/^worktree /,""); path=$0} /^bare$/{bare=1} END{if (!bare) print path}' || true)"
@@ -523,7 +540,10 @@ if [ "$found" = 1 ]; then
     if [ -n "$_ktop" ] && [ -d "$_ktop/.keel" ]; then _klog="$_ktop/.keel/impact-events.log"; fi
   fi
   if [ -n "$_klog" ]; then
-    printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" guard secret-guard blocked \
+    # $KEEL_IMPACT_LOG was set explicitly, so the resolution block above (and $_kclaim with it) never ran
+    # — compute it fresh here, the only remaining case that needs a subprocess for it.
+    [ -n "$_kclaim" ] || _kclaim="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" guard secret-guard blocked "$_kclaim" \
       >> "$_klog" 2>/dev/null || true
   fi
   echo "" >&2
