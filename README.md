@@ -135,12 +135,11 @@ couple of troubleshooting notes. None of them are bugs in the transfer itself.
 
 - **On a Rockbox dual-boot iPod, the Finder "sync" device vanishing seconds
   after plug-in is normal.** The Apple firmware answers USB first, so Finder
-  briefly lists the iPod as a syncable device; about ten seconds later Rockbox
-  takes over the connection and exposes the plain USB disk, and the Finder sync
-  entry disappears. The disk stays mounted — and the disk is all PodFlick needs.
-  Wait for Rockbox's USB screen, then transfer as usual. (Some Rockbox iPods
-  never expose a disk from the Apple firmware at all, so the Rockbox USB screen
-  is the state to look for.)
+  briefly lists the iPod as a syncable device; then Rockbox takes over and
+  exposes the plain USB disk. The disk stays mounted — and the disk is all
+  PodFlick needs. Wait for Rockbox's USB screen, then transfer as usual. (Some
+  Rockbox iPods never expose a disk from the Apple firmware at all, so the
+  Rockbox USB screen is the state to look for.)
 
 - **If the iPod keeps mounting and unmounting (flapping),** try a different USB
   cable before anything else. A device that mounts for a second, disconnects, and
